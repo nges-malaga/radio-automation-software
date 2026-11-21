@@ -2050,6 +2050,9 @@ span.mwait {
   white-space: nowrap;
 }
 .browser-cols .bcol:hover { color: var(--text); }
+/* Las cabeceras, todas con la misma letra (no la de su columna) */
+.browser-cols .bcol { font-family: inherit; font-size: 10.5px; color: var(--text-faint); }
+.browser-cols .bcol:hover { color: var(--text); }
 .bcol-name { display: flex; align-items: center; gap: 3px; }
 .bcol-dur { text-align: right; }
 .sort-mark { font-size: 10.5px; color: var(--accent); }
@@ -4228,6 +4231,9 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   flex-wrap: wrap;
 }
 .ai-toolbar .spacer { flex: 1; }
+.ai-actions { margin-bottom: 10px; }
+.ai-actions-list { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.ai-actions-list + .ai-actions-list { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); }
 .ai-list {
   display: flex;
   flex-direction: column;
