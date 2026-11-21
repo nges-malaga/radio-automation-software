@@ -92,7 +92,11 @@ import {
 import { Help } from "./Help";
 
 type Mode = "blocks" | "music" | "explorer" | "tags" | "history";
-type SortKey = "title" | "album" | "genre" | "duration";
+type SortKey = "title" | "album" | "genre" | "added" | "duration";
+
+/** Fecha de alta en la biblioteca, corta (dd/mm/aa). */
+const fmtAdded = (secs: number | undefined) =>
+  secs && secs > 86_400 ? new Date(secs * 1000).toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "—";
 const NONE = "__none";
 /** Selecciones especiales de la vista Etiquetas: energía (0–5) y tipo de medio */
 const ENERGY_SEL = "__energy:";
@@ -630,7 +634,13 @@ function MusicBrowserBase({
     const dir = sort.dir;
     return [...list].sort((a, b) => {
       let d = 0;
-      if (sort.key === "duration") d = a.durationSecs - b.durationSecs;
+      // Por fecha de alta: las que no tienen fecha, siempre al final.
+      if (sort.key === "added") {
+        const x = a.addedAt ?? 0;
+        const y = b.addedAt ?? 0;
+        if (!x !== !y) return x ? -1 : 1;
+        d = x - y;
+      } else if (sort.key === "duration") d = a.durationSecs - b.durationSecs;
       else if (sort.key === "album") d = a.album.localeCompare(b.album, "es");
       else if (sort.key === "genre") d = a.genre.localeCompare(b.genre, "es");
       else d = a.title.localeCompare(b.title, "es");
@@ -672,7 +682,8 @@ function MusicBrowserBase({
   };
 
   const toggleSort = (key: SortKey) => {
-    setSort((s) => (s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: 1 }));
+    // La fecha de alta empieza por las más recientes.
+    setSort((s) => (s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: key === "added" ? -1 : 1 }));
   };
 
   const closeCtx = useCallback(() => setCtx(null), []);
@@ -1118,6 +1129,7 @@ function MusicBrowserBase({
                   </div>
                   <span className="bcell bcol-album" title={t.album}>{t.album || "—"}</span>
                   <span className="bcell bcol-genre" title={t.genre}>{t.genre || "—"}</span>
+                  <span className="bcell bcol-added">{fmtAdded(t.addedAt)}</span>
                   {last ?? <span className="bcell bcol-dur">{fmtTime(t.durationSecs)}</span>}
                   <div className="brow-acts">
                     <button
@@ -1608,6 +1620,10 @@ function MusicBrowserBase({
             <button type="button" className="bcol bcol-genre" onClick={() => toggleSort("genre")}>
               Estilo
               {sort.key === "genre" && <span className="sort-mark">{sort.dir === 1 ? "↑" : "↓"}</span>}
+            </button>
+            <button type="button" className="bcol bcol-added" onClick={() => toggleSort("added")} title="Fecha en que entró en la biblioteca">
+              Alta
+              {sort.key === "added" && <span className="sort-mark">{sort.dir === 1 ? "↑" : "↓"}</span>}
             </button>
             <button
               type="button"
