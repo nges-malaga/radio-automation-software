@@ -270,6 +270,8 @@ pub fn run() {
             library::list_blocks,
             library::create_block,
             library::rename_block,
+            library::block_set_cover,
+            cloudsync::block_cover_ai,
             library::delete_block,
             library::set_track_blocks,
             library::move_tracks_block,

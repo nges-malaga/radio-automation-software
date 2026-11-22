@@ -21,9 +21,9 @@ import { TrackDetailsModal } from "./TrackDetailsModal";
 import { NavArrows } from "./NavArrows";
 import { ScheduleEditor, newScheduleBlock } from "./ScheduleEditor";
 import { beginDrag, registerDropZone } from "../dnd";
-import { GalleryHeader, MusicGallery, matchesSel } from "./MusicGallery";
+import { GalleryHeader, MusicGallery, coverSrc, matchesSel } from "./MusicGallery";
 import { ExplorerView } from "./ExplorerView";
-import { pickScanFolder, scanFolder, aiWindowPayloadSet } from "../api";
+import { pickScanFolder, scanFolder, aiWindowPayloadSet, blockSetCover, blockCoverAi, pickImageFile } from "../api";
 import { openAiWindow } from "../bridge";
 import { listen } from "@tauri-apps/api/event";
 import { IS_WEB } from "../platform";
@@ -113,6 +113,8 @@ interface MusicBrowserProps {
   onToggleAutoBlock: (blockId: string) => void;
   onCreateBlock: (name: string) => Promise<void>;
   onRenameBlock: (id: string, name: string) => Promise<void>;
+  /** Tras cambiar algo de una lista (p. ej. su portada) */
+  onBlocksChanged?: () => Promise<void>;
   onDeleteBlock: (id: string) => Promise<void>;
   onScan: () => Promise<number>;
   onPickFiles: () => void;
@@ -246,6 +248,80 @@ function fileStem(name: string): string {
   return dot > 0 ? name.slice(0, dot) : name;
 }
 
+/** Cabecera de una lista: portada (propia o la de su primera canción) y cómo cambiarla. */
+function ListHeader({
+  block,
+  fallback,
+  count,
+  onChanged,
+  showToast,
+}: {
+  block: Block;
+  fallback: string;
+  count: number;
+  onChanged: () => void;
+  showToast: (m: string) => void;
+}) {
+  const [busy, setBusy] = useState<"" | "upload" | "ai">("");
+  const own = !!block.cover;
+  const src = block.cover || fallback;
+  const run = async (kind: "upload" | "ai" | "clear") => {
+    try {
+      if (kind === "upload") {
+        const file = await pickImageFile(`Portada de «${block.name}»`, ["jpg", "jpeg", "png", "webp"]);
+        if (!file) return;
+        setBusy("upload");
+        await blockSetCover(block.id, file);
+      } else if (kind === "ai") {
+        setBusy("ai");
+        await blockCoverAi(block.id);
+        showToast(`Portada generada para «${block.name}»`);
+      } else {
+        await blockSetCover(block.id, null);
+      }
+      onChanged();
+    } catch (e) {
+      showToast(String(e));
+    } finally {
+      setBusy("");
+    }
+  };
+  return (
+    <div className="list-head">
+      <span className="list-cover" title={own ? "Portada de la lista" : src ? "Sin portada propia: se usa la carátula de la primera canción" : "Sin portada"}>
+        {src ? <img src={coverSrc(src)} alt="" draggable={false} /> : busy !== "ai" && <span>{block.name.slice(0, 2).toUpperCase()}</span>}
+        {busy === "ai" && <span className="list-cover-busy">Generando…</span>}
+      </span>
+      <div className="list-head-info">
+        <strong title={block.name}>{block.name}</strong>
+        <span>
+          {count === 1 ? "1 canción" : `${count} canciones`}
+          {!own && src ? " · portada de la primera canción" : ""}
+        </span>
+        <div className="list-head-acts">
+          <button type="button" className="btn btn-sm" disabled={!!busy} onClick={() => void run("upload")}>
+            {own ? "Cambiar portada…" : "Subir portada…"}
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm"
+            disabled={!!busy}
+            onClick={() => void run("ai")}
+            title="La genera la IA de la nube a partir del nombre y el contenido de la lista; llega también a OmniCaster Music"
+          >
+            {busy === "ai" ? "Generando…" : own ? "Regenerar con IA" : "Generar con IA"}
+          </button>
+          {own && (
+            <button type="button" className="btn btn-sm btn-ghost" disabled={!!busy} onClick={() => void run("clear")}>
+              Quitar
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MusicBrowserBase({
   tracks,
   blocks,
@@ -256,6 +332,7 @@ function MusicBrowserBase({
   onToggleAutoBlock,
   onCreateBlock,
   onRenameBlock,
+  onBlocksChanged,
   onDeleteBlock,
   onScan,
   onPickFiles,
@@ -459,6 +536,7 @@ function MusicBrowserBase({
 
   // Bloque cuya lista se esta viendo: soltar canciones en ella las suma a la lista.
   const listBlockId = mode === "blocks" && selection && selection !== NONE ? selection : "";
+  const listBlock = listBlockId ? blocks.find((b) => b.id === listBlockId) : undefined;
 
   // Soltar sobre la lista de bloques (con el puntero; ver dnd.ts).
   const dropRef = useRef({ moveBlockItem, onAssignTrackBlock, onImportPaths });
@@ -1600,6 +1678,14 @@ function MusicBrowserBase({
               backTo={musicBack[musicBack.length - 1] ?? ""}
               onBack={musicGoBack}
               onOpen={openMusic}
+            />
+          ) : listBlock ? (
+            <ListHeader
+              block={listBlock}
+              fallback={filtered.find((t) => t.cover)?.cover ?? ""}
+              count={filtered.length}
+              onChanged={() => void onBlocksChanged?.()}
+              showToast={showToast}
             />
           ) : (
             <div className="browser-crumbs">

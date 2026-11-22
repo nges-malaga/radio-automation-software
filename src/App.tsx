@@ -4902,6 +4902,7 @@ export default function App() {
                 onToggleAutoBlock={toggleAutoBlock}
                 onCreateBlock={handleCreateBlock}
                 onRenameBlock={handleRenameBlock}
+                onBlocksChanged={async () => setBlocks(await listBlocks())}
                 onDeleteBlock={handleDeleteBlock}
                 onScan={scanMusicFolder}
                 onPickFiles={pickFiles}

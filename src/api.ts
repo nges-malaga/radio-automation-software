@@ -295,6 +295,14 @@ export function createBlock(name: string): Promise<Block> {
 export function renameBlock(id: string, name: string): Promise<void> {
   return invoke("rename_block", { id, name });
 }
+/** Portada de una lista desde una imagen de este equipo (null = quitarla). */
+export function blockSetCover(id: string, file: string | null): Promise<string> {
+  return invoke<string>("block_set_cover", { id, file });
+}
+/** Portada generada por IA en la nube para una lista. */
+export function blockCoverAi(id: string): Promise<string> {
+  return invoke<string>("block_cover_ai", { id });
+}
 
 export function deleteBlock(id: string): Promise<void> {
   return invoke("delete_block", { id });
@@ -519,11 +527,11 @@ export function pushStreamPcm(data: number[]): Promise<void> {
   return invoke("stream_push_pcm", { data });
 }
 
-export async function pickImageFile(): Promise<string | null> {
+export async function pickImageFile(title = "Logo de la emisora", extensions = ["png", "jpg", "jpeg", "webp", "gif"]): Promise<string | null> {
   return openDialog({
     multiple: false,
-    title: "Logo de la emisora",
-    filters: [{ name: "Imagen", extensions: ["png", "jpg", "jpeg", "webp", "gif"] }],
+    title,
+    filters: [{ name: "Imagen", extensions }],
   });
 }
 

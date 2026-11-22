@@ -549,7 +549,16 @@ fn collect_local(sh: &Shared, need: &mut HashMap<String, PathBuf>) -> HashMap<St
     }
     crate::cloudmedia::upload_new(dir, fresh_files);
     for b in crate::library::read_blocks(dir) {
-        add("block", b.id.clone(), serde_json::to_value(&b).unwrap_or(Value::Null));
+        let mut v = serde_json::to_value(&b).unwrap_or(Value::Null);
+        // La portada viaja como imagen («media:<sha256>.<ext>»), no como ruta.
+        if let Value::Object(m) = &mut v {
+            let abs = crate::library::block_cover_abs(dir, &b.cover);
+            if !abs.is_empty() {
+                m.insert("cover".into(), Value::String(abs));
+            }
+        }
+        images_out(sh, &mut v, need);
+        add("block", b.id.clone(), v);
     }
     if let Ok(rd) = fs::read_dir(dir.join(crate::playlists::PLAYLISTS_DIR)) {
         for e in rd.flatten() {
@@ -590,7 +599,7 @@ struct Incoming {
 /// Aplica lo que llega del maestro. Devuelve cuántos elementos cambió aquí.
 fn apply(sh: &Shared, join: &crate::cloud::JoinFile, mut incoming: Vec<Incoming>) -> Result<(), String> {
     // Las imágenes de programas, eventos y campañas: a este equipo.
-    for it in incoming.iter_mut().filter(|i| (APP_KINDS.contains(&i.kind.as_str()) && i.kind != "playlist") || i.kind == "track") {
+    for it in incoming.iter_mut().filter(|i| (APP_KINDS.contains(&i.kind.as_str()) && i.kind != "playlist") || i.kind == "track" || i.kind == "block") {
         images_in(sh, join, &mut it.data);
     }
     if incoming.is_empty() {
@@ -682,7 +691,8 @@ fn apply(sh: &Shared, join: &crate::cloud::JoinFile, mut incoming: Vec<Incoming>
             for it in blocks {
                 bs.retain(|b| b.id != it.id);
                 if !it.deleted {
-                    if let Ok(b) = serde_json::from_value::<crate::library::Block>(it.data.clone()) {
+                    if let Ok(mut b) = serde_json::from_value::<crate::library::Block>(it.data.clone()) {
+                        b.cover = crate::library::block_cover_rel(dir, &b.cover);
                         bs.push(b);
                     }
                 }
@@ -1325,3 +1335,68 @@ mod tests {
         assert_eq!(digest(&v), digest(&v2));
     }
 }
+
+// ------------------------------------------------------------ portada IA de una lista
+
+/// Pide a la nube una portada generada por IA para una lista (cualquiera,
+/// inteligente o no), la baja y la deja puesta. La nube la guarda también en
+/// la ficha de la lista, así que llega igual al resto de equipos.
+#[tauri::command]
+pub async fn block_cover_ai(state: tauri::State<'_, crate::AppState>, id: String) -> Result<String, String> {
+    let dir = state.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let join = crate::cloud::read_join(&dir).ok_or("Este equipo no está conectado a la nube")?;
+        if !id.bytes().all(|b| b.is_ascii_hexdigit()) || id.len() != 32 {
+            return Err("Lista no válida".to_string());
+        }
+        let ag = agent();
+        let auth = format!("Bearer {}", join.token);
+        let resp = ag
+            .post(&format!("{}/v1/station/blocks/{id}/cover", join.api))
+            .set("Authorization", &auth)
+            .send_string("")
+            .map_err(|e| match e {
+                ureq::Error::Status(404, _) => "La nube aún no tiene esta lista (espera a que se sincronice) o no admite portadas IA".to_string(),
+                e => net_err(e),
+            })?;
+        let v: Value = serde_json::from_str(&resp.into_string().map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        let cover = v.get("cover").and_then(Value::as_str).unwrap_or("").to_string();
+        let name = cover.strip_prefix("media:").ok_or("La nube no devolvió ninguna portada")?;
+        let (stem, _) = name.split_once('.').unwrap_or((name, ""));
+        if !is_sha(stem) || name.contains(['/', '\\']) {
+            return Err("Respuesta de la nube no válida".into());
+        }
+        let folder = dir.join(IMG_DIR);
+        fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+        let path = folder.join(name);
+        if !path.is_file() {
+            let mut rd = ag
+                .get(&format!("{}/v1/media/{stem}", join.api))
+                .set("Authorization", &auth)
+                .call()
+                .map_err(net_err)?
+                .into_reader();
+            let part = path.with_extension("part");
+            let mut out = File::create(&part).map_err(|e| e.to_string())?;
+            std::io::copy(&mut rd, &mut out).map_err(|e| format!("Descarga cortada: {e}"))?;
+            drop(out);
+            if crate::cloudmedia::hash_file_pub(&part).map_err(|e| e.to_string())? != stem {
+                let _ = fs::remove_file(&part);
+                return Err("La imagen bajada no coincide con su huella".into());
+            }
+            fs::rename(&part, &path).map_err(|e| e.to_string())?;
+        }
+        {
+            let _g = crate::library::lock_library();
+            let mut blocks = crate::library::read_blocks(&dir);
+            if let Some(b) = blocks.iter_mut().find(|b| b.id == id) {
+                b.cover = format!("{IMG_DIR}/{name}");
+            }
+            crate::library::write_blocks(&dir, &blocks)?;
+        }
+        Ok(path.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+

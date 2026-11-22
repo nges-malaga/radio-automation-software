@@ -2186,6 +2186,11 @@ const BLOCKS_FILE: &str = "blocks.json";
 pub struct Block {
     pub id: String,
     pub name: String,
+    /// Portada de la lista: ruta dentro de la carpeta de datos
+    /// («portadas-listas/…» si se subió aquí, «maestro-imagenes/…» si vino de
+    /// la nube) o «media:<sha256>.<ext>» mientras no se ha bajado.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub cover: String,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -2194,6 +2199,34 @@ pub struct BlockInfo {
     pub id: String,
     pub name: String,
     pub track_count: usize,
+    /// Portada (ruta absoluta de este equipo; vacía si no tiene o aún no está)
+    pub cover: String,
+}
+
+/// Carpeta (en los datos) de las portadas de lista subidas en este equipo.
+pub const LIST_COVERS_DIR: &str = "portadas-listas";
+
+/// Ruta absoluta de la portada de una lista, si está en este equipo.
+pub fn block_cover_abs(data_dir: &Path, cover: &str) -> String {
+    let c = cover.trim();
+    if c.is_empty() || c.starts_with("media:") {
+        return String::new();
+    }
+    let p = Path::new(c);
+    let abs = if p.is_absolute() { p.to_path_buf() } else { data_dir.join(p) };
+    if abs.is_file() {
+        abs.to_string_lossy().into_owned()
+    } else {
+        String::new()
+    }
+}
+
+/// Ruta absoluta -> relativa a la carpeta de datos (si está dentro).
+pub fn block_cover_rel(data_dir: &Path, cover: &str) -> String {
+    Path::new(cover)
+        .strip_prefix(data_dir)
+        .map(|r| r.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_else(|_| cover.to_string())
 }
 
 pub(crate) fn read_blocks(data_dir: &Path) -> Vec<Block> {
@@ -2216,6 +2249,7 @@ pub fn list_blocks(state: State<'_, AppState>) -> Result<Vec<BlockInfo>, String>
         .into_iter()
         .map(|b| BlockInfo {
             track_count: tracks.iter().filter(|t| t.blocks.contains(&b.id)).count(),
+            cover: block_cover_abs(&state.data_dir, &b.cover),
             id: b.id,
             name: b.name,
         })
@@ -2235,6 +2269,7 @@ pub fn create_block(state: State<'_, AppState>, name: String) -> Result<BlockInf
     let b = Block {
         id: Uuid::new_v4().simple().to_string(),
         name,
+        cover: String::new(),
     };
     blocks.push(b.clone());
     write_blocks(&state.data_dir, &blocks)?;
@@ -2242,7 +2277,45 @@ pub fn create_block(state: State<'_, AppState>, name: String) -> Result<BlockInf
         id: b.id,
         name: b.name,
         track_count: 0,
+        cover: String::new(),
     })
+}
+
+/// Pone (o quita, con `file` vacío) la portada de una lista con una imagen
+/// de este equipo. Se copia a la carpeta de datos y la sincronización la sube.
+#[tauri::command]
+pub fn block_set_cover(state: State<'_, AppState>, id: String, file: Option<String>) -> Result<String, String> {
+    let dir = &state.data_dir;
+    let _g = lock_library();
+    let mut blocks = read_blocks(dir);
+    let b = blocks.iter_mut().find(|b| b.id == id).ok_or("Lista no encontrada")?;
+    let old = block_cover_abs(dir, &b.cover);
+    let new_rel = match file.as_deref().map(str::trim).filter(|f| !f.is_empty()) {
+        None => String::new(),
+        Some(f) => {
+            let src = Path::new(f);
+            let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+            if !["jpg", "jpeg", "png", "webp"].contains(&ext.as_str()) {
+                return Err("Formato no admitido: usa JPG, PNG o WebP".into());
+            }
+            let len = fs::metadata(src).map_err(|e| e.to_string())?.len();
+            if len > 10 * 1024 * 1024 {
+                return Err("La imagen pasa de 10 MB".into());
+            }
+            let folder = dir.join(LIST_COVERS_DIR);
+            fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+            let name = format!("{}-{}.{ext}", b.id, Uuid::new_v4().simple());
+            fs::copy(src, folder.join(&name)).map_err(|e| e.to_string())?;
+            format!("{LIST_COVERS_DIR}/{name}")
+        }
+    };
+    b.cover = new_rel.clone();
+    write_blocks(dir, &blocks)?;
+    // La anterior, si era una copia nuestra, ya no hace falta.
+    if !old.is_empty() && Path::new(&old).parent() == Some(dir.join(LIST_COVERS_DIR).as_path()) {
+        let _ = fs::remove_file(&old);
+    }
+    Ok(block_cover_abs(dir, &new_rel))
 }
 
 #[tauri::command]
@@ -2563,6 +2636,7 @@ pub fn import_playlist(
                     let b = Block {
                         id: Uuid::new_v4().simple().to_string(),
                         name,
+                        cover: String::new(),
                     };
                     blocks.push(b.clone());
                     (b, true)

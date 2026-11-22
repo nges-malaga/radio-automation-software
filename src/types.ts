@@ -222,6 +222,8 @@ export interface Block {
   id: string;
   name: string;
   trackCount: number;
+  /** Portada de la lista (ruta de este equipo); vacía = la de su primera canción */
+  cover?: string;
 }
 
 export interface TrackPatch {
