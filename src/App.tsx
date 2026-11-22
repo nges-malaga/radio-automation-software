@@ -412,6 +412,9 @@ function alignPlaylistMeta(
   });
 }
 
+/** Marca de «inserción» (cuña o evento): en bucle, sale de la lista al sonar. */
+const TEMP_SLOT = "~insert";
+
 /** Igual que alignPlaylistMeta, para los huecos de rotación. */
 function alignSlots(
   oldIds: string[],
@@ -473,7 +476,7 @@ function rowsOf(pl: Playlist | undefined, tracks: Track[]): PlaylistRow[] {
         energy: t.energy ?? 0,
         mediaType: t.mediaType ?? "",
         pos: index,
-        slot: pl.slots?.[index] ?? undefined,
+        slot: pl.slots?.[index] && pl.slots[index] !== TEMP_SLOT ? pl.slots[index]! : undefined,
       },
     ];
   });
@@ -620,6 +623,8 @@ export default function App() {
   // automática (si no, cambiaría las listas de todos los equipos).
   const workstation = settings.stationMode === "workstation";
   const autopilotOn = settings.autopilotEnabled && !workstation;
+  const autopilotOnRef = useRef(autopilotOn);
+  autopilotOnRef.current = autopilotOn;
   const cutsTrack = tracks.find((track) => track.id === cutsTrackId) ?? null;
   const defaultBlockId = blocks.some((block) => block.id === settings.defaultBlockId)
     ? settings.defaultBlockId
@@ -1934,7 +1939,8 @@ export default function App() {
     (
       fn: (ids: string[]) => string[],
       overrides?: (id: string, index: number) => StreamMeta | null,
-    ) => mutateById(activeIdRef.current, fn, overrides),
+      slotOverrides?: (id: string, index: number) => string | null | undefined,
+    ) => mutateById(activeIdRef.current, fn, overrides, slotOverrides),
     [mutateById],
   );
   const mutateListRef = useRef(mutateList);
@@ -2051,9 +2057,17 @@ export default function App() {
     prevPlayRowRef.current = playingRow;
     if (prev < 0 || prev === playingRow) return;
     const pl = playlistsRef.current.find((p) => p.id === activeIdRef.current);
-    if (!pl?.loop || !pl.slots?.some(Boolean)) return;
+    if (!pl?.loop || !pl.slots?.some(Boolean) || autopilotOnRef.current) return;
     const row = rowsOf(pl, tracksRef.current)[prev];
-    if (!row?.slot || row.pos === undefined || prev === playingRow) return;
+    if (!row || row.pos === undefined) return;
+    // Cuñas y eventos insertados: en bucle no se quedan para la próxima vuelta.
+    if (pl.slots[row.pos] === TEMP_SLOT) {
+      const at = row.pos;
+      const gone = row.id;
+      void mutateById(pl.id, (cur) => (cur[at] === gone ? cur.filter((_, i) => i !== at) : cur));
+      return;
+    }
+    if (!row.slot) return;
     const pos = row.pos;
     const blockId = row.slot;
     const oldId = row.id;
@@ -2883,6 +2897,7 @@ export default function App() {
           return copy;
         },
         (_id, index) => (index === insertedAt && hasMeta(event.meta) ? event.meta! : null),
+        (_id, index) => (index === insertedAt ? TEMP_SLOT : undefined),
       );
 
       const item: PendingInsert = {
@@ -3096,17 +3111,20 @@ export default function App() {
       if (due.length === 0) return;
       const base = playing >= 0 ? playing + 1 : rowsNow.length;
       const metaByIndex = new Map<number, StreamMeta>();
+      const insertedAt = new Set<number>();
       void mutateListRef.current(
         (ids) => {
           const copy = [...ids];
           due.forEach((d, i) => {
             const at = Math.min(copy.length, base + i);
             copy.splice(at, 0, d.spotId);
+            insertedAt.add(at);
             if (hasMeta(d.campaign.meta)) metaByIndex.set(at, d.campaign.meta!);
           });
           return copy;
         },
         (_id, index) => metaByIndex.get(index) ?? null,
+        (_id, index) => (insertedAt.has(index) ? TEMP_SLOT : undefined),
       );
       setSettings((prev) => {
         let campaigns = prev.campaigns;
@@ -3236,6 +3254,7 @@ export default function App() {
       if (queue.length > 0) {
         let base = playing >= 0 ? playing + 1 : 0;
         const metaByIndex = new Map<number, StreamMeta>();
+        const insertedAt = new Set<number>();
         void mutateListRef.current(
           (ids) => {
             let copy = [...ids];
@@ -3243,12 +3262,14 @@ export default function App() {
               copy = copy.filter((id) => id !== item.trackId);
               const at = Math.max(0, Math.min(copy.length, base));
               copy.splice(at, 0, item.trackId);
+              insertedAt.add(at);
               if (hasMeta(item.event.meta)) metaByIndex.set(at, item.event.meta!);
               base = at + 1;
             }
             return copy;
           },
           (_id, index) => metaByIndex.get(index) ?? null,
+          (_id, index) => (insertedAt.has(index) ? TEMP_SLOT : undefined),
         );
         const nowMs = Date.now();
         for (const item of queue) {
