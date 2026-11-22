@@ -91,6 +91,9 @@ import {
   IconNote,
 } from "../icons";
 import { Help } from "./Help";
+import { FilterBar } from "./FilterBar";
+import { EMPTY_FILTER, filterCount, matchFilter } from "../trackFilters";
+import type { TrackFilter } from "../trackFilters";
 
 type Mode = "blocks" | "music" | "explorer" | "tags" | "history";
 type SortKey = "title" | "album" | "genre" | "added" | "duration";
@@ -356,6 +359,8 @@ function MusicBrowserBase({
   const [musicBack, setMusicBack] = useState<string[]>([]);
   const [selection, setSelection] = useState("");
   const [query, setQuery] = useState("");
+  /** Filtro discreto del operario: idioma y energía */
+  const [qfilter, setQfilter] = useState<TrackFilter>(EMPTY_FILTER);
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "title", dir: 1 });
   const [selectedId, setSelectedId] = useState("");
   const [ctx, setCtx] = useState<CtxMenu | null>(null);
@@ -705,6 +710,8 @@ function MusicBrowserBase({
       }
     }
 
+    if (filterCount(qfilter)) list = list.filter((t) => matchFilter(t, qfilter));
+
     const q = query.trim().toLowerCase();
     if (q) {
       list = list.filter(
@@ -735,7 +742,7 @@ function MusicBrowserBase({
       if (d === 0) d = a.artist.localeCompare(b.artist, "es");
       return d * dir;
     });
-  }, [tracks, musicTracks, mode, selection, query, sort]);
+  }, [tracks, musicTracks, mode, selection, query, sort, qfilter]);
 
   // Coloca la seleccion en disco y abre (o trae al frente) su ventana. El
   // analisis trabaja ahi: si se minimiza, sigue en segundo plano.
@@ -1269,6 +1276,7 @@ function MusicBrowserBase({
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
+        <FilterBar tracks={tracks} filter={qfilter} onChange={setQfilter} simple />
         <button
           type="button"
           className="btn btn-sm icon-only"

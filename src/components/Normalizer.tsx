@@ -9,6 +9,9 @@ import { WindowControls } from "./WindowControls";
 import { TrackEditor } from "./TrackEditor";
 import { mediaRule, mediaTypeLabel, useMediaTypes } from "../mediaTypes";
 import { qualityBadge } from "./MusicBrowser";
+import { FilterBar } from "./FilterBar";
+import { EMPTY_FILTER, filterCount, matchFilter } from "../trackFilters";
+import type { TrackFilter } from "../trackFilters";
 import { languageFlag, languageName } from "../languages";
 
 /** Fecha de alta en la biblioteca, dd/mm/aa. */
@@ -112,6 +115,7 @@ function Pane({
 }: PaneProps) {
   const [mode, setMode] = useState<Mode>("blocks");
   const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<TrackFilter>(EMPTY_FILTER);
   const [pick, setPick] = useState(initialBlock);
   const firstMode = useRef(true);
   const touched = useRef(false);
@@ -175,11 +179,12 @@ function Pane({
   }, [tracks, mode, pick]);
 
   const visible = useMemo(() => {
-    const list = base.filter((t) => matchesSearch(t, q));
+    const on = filterCount(filter) > 0;
+    const list = base.filter((t) => matchesSearch(t, q) && (!on || matchFilter(t, filter)));
     return list.sort((a, b) =>
       (a.title || "").localeCompare(b.title || "", "es", { sensitivity: "base" }),
     );
-  }, [base, q]);
+  }, [base, q, filter]);
 
   const folders = useMemo(() => {
     const map = new Map<string, { path: string; count: number }>();
@@ -433,6 +438,7 @@ function Pane({
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
+        <FilterBar tracks={tracks} filter={filter} onChange={setFilter} resultCount={visible.length} />
         <button
           type="button"
           className="btn btn-sm"
