@@ -150,6 +150,7 @@ interface EditState {
   album: string;
   genre: string;
   year: string;
+  isrc: string;
   tagsText: string;
   language: string;
   disabled: boolean;
@@ -325,6 +326,9 @@ function ListHeader({
     </div>
   );
 }
+
+/** ISRC válido: 2 letras, 3 alfanuméricos y 7 cifras (los guiones no cuentan). */
+const isrcOk = (v: string) => /^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$/.test(v.replace(/[-\s]/g, "").toUpperCase());
 
 function MusicBrowserBase({
   tracks,
@@ -846,7 +850,7 @@ function MusicBrowserBase({
     return ids.includes(id) ? ids : [id];
   };
   const editKey = (e: Omit<EditState, "orig" | "busy" | "navIds">) =>
-    JSON.stringify([e.title, e.artist, e.albumArtist, e.album, e.genre, e.year, e.tagsText, e.language, e.disabled, e.energy, e.mood, e.themesText, e.hours, e.mediaType, e.blocks, e.coverChange]);
+    JSON.stringify([e.title, e.artist, e.albumArtist, e.album, e.genre, e.year, e.isrc, e.tagsText, e.language, e.disabled, e.energy, e.mood, e.themesText, e.hours, e.mediaType, e.blocks, e.coverChange]);
   const makeEdit = (t: Track, navIds: string[]): EditState => {
     const e = {
       id: t.id,
@@ -856,6 +860,7 @@ function MusicBrowserBase({
       album: t.album,
       genre: t.genre,
       year: t.year,
+      isrc: t.isrc ?? "",
       tagsText: t.tags.join(", "),
       language: t.language ?? "",
       disabled: !!t.disabled,
@@ -897,6 +902,7 @@ function MusicBrowserBase({
         album: edit.album.trim(),
         genre: edit.genre.trim(),
         year: edit.year.trim(),
+        isrc: edit.isrc.replace(/[-\s]/g, "").toUpperCase(),
         language: edit.language,
         disabled: edit.disabled,
         energy: edit.energy,
@@ -2110,6 +2116,18 @@ function MusicBrowserBase({
                 <label className="field field-year">
                   <span className="field-label">Año</span>
                   <input value={edit.year} onChange={(e) => setEdit({ ...edit, year: e.target.value })} />
+                </label>
+                <label className="field field-isrc">
+                  <span className="field-label">ISRC</span>
+                  <input
+                    value={edit.isrc}
+                    maxLength={15}
+                    placeholder="ESA011900123"
+                    spellCheck={false}
+                    className={edit.isrc && !isrcOk(edit.isrc) ? "input-bad" : ""}
+                    title="Código ISRC: 2 letras (país), 3 letras o cifras (registrante) y 7 cifras. Los guiones se quitan al guardar."
+                    onChange={(e) => setEdit({ ...edit, isrc: e.target.value.toUpperCase() })}
+                  />
                 </label>
               </div>
               <div className="field-row">

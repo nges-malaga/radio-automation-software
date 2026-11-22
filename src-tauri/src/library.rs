@@ -40,6 +40,9 @@ pub struct Track {
     pub genre: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub year: String,
+    /// Código ISRC (12 caracteres: 2 letras, 3 alfanuméricos y 7 cifras, sin guiones).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub isrc: String,
     pub duration_secs: f64,
     /// Enlace al archivo (ruta absoluta). Puede quedar inaccesible sin que la
     /// cancion muera: el estado `missing` se calcula al listar.
@@ -718,16 +721,86 @@ fn ch_out(out: &mut String, last_space: &mut bool) {
     }
 }
 
+/// ISRC normalizado (mayúsculas, sin guiones ni espacios) si cumple el formato:
+/// 2 letras (país), 3 alfanuméricos (registrante) y 7 cifras (año + designación).
+pub fn clean_isrc(raw: &str) -> Option<String> {
+    let s: String = raw.chars().filter(|c| !matches!(c, '-' | ' ' | '_' | '.')).collect::<String>().trim().to_ascii_uppercase();
+    let b = s.as_bytes();
+    let ok = b.len() == 12
+        && b[..2].iter().all(u8::is_ascii_uppercase)
+        && b[2..5].iter().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+        && b[5..].iter().all(u8::is_ascii_digit);
+    ok.then_some(s)
+}
+
+/// Año (4 cifras) de una fecha de etiqueta: «2019», «2019-05-03», «03/05/2019»…
+pub fn year_of(raw: &str) -> Option<String> {
+    let digits: Vec<char> = raw.chars().collect();
+    for w in 0..digits.len() {
+        let run: String = digits[w..].iter().take_while(|c| c.is_ascii_digit()).collect();
+        if run.len() == 4 && (w == 0 || !digits[w - 1].is_ascii_digit()) {
+            let y: u32 = run.parse().ok()?;
+            if (1000..=2999).contains(&y) {
+                return Some(run);
+            }
+        }
+    }
+    None
+}
+
+/// Año de las etiquetas: TDRC/TYER (ID3), DATE (FLAC/Vorbis), ©day (MP4)…
+fn tag_year(tag: &lofty::tag::Tag) -> Option<String> {
+    use lofty::tag::ItemKey;
+    if let Some(d) = tag.date() {
+        if (1000..=2999).contains(&(d.year as u32)) {
+            return Some(d.year.to_string());
+        }
+    }
+    [ItemKey::RecordingDate, ItemKey::Year, ItemKey::ReleaseDate, ItemKey::OriginalReleaseDate]
+        .iter()
+        .filter_map(|k| tag.get_string(*k))
+        .find_map(year_of)
+}
+
+/// ISRC de las etiquetas: TSRC (ID3), ISRC (FLAC/Vorbis y MP4). Algunos
+/// programas lo dejan en un campo libre (TXXX:ISRC en ID3): también vale.
+fn tag_isrc(path: &Path, tagged: &lofty::file::TaggedFile) -> Option<String> {
+    use lofty::tag::ItemKey;
+    tagged
+        .tags()
+        .iter()
+        .find_map(|t| t.get_string(ItemKey::Isrc).and_then(clean_isrc))
+        .or_else(|| id3_user_isrc(path))
+}
+
+/// TXXX:ISRC de un MP3 (solo si no trae TSRC).
+fn id3_user_isrc(path: &Path) -> Option<String> {
+    use lofty::file::AudioFile;
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    if ext != "mp3" && ext != "mp2" {
+        return None;
+    }
+    let mut f = fs::File::open(path).ok()?;
+    let m = lofty::mpeg::MpegFile::read_from(&mut f, lofty::config::ParseOptions::new()).ok()?;
+    let tag = m.id3v2()?;
+    ["ISRC", "isrc", "Isrc"].iter().find_map(|d| tag.get_user_text(d)).and_then(clean_isrc)
+}
+
 fn read_metadata(
     path: &Path,
     fallback_title: String,
     fallback_artist: String,
-) -> (String, String, String, String, String, f64) {
+) -> (String, String, String, String, String, f64, String) {
     match read_from_path(path) {
         Ok(tagged) => {
             let duration = tagged.properties().duration().as_secs_f64();
             let (mut title, mut artist, mut album, mut genre, mut year) =
                 (fallback_title, fallback_artist, String::new(), String::new(), String::new());
+            let isrc = tag_isrc(path, &tagged).unwrap_or_default();
+            // El año, de la primera etiqueta que lo tenga (un MP3 puede traer ID3v1 y v2).
+            if let Some(y) = tagged.primary_tag().and_then(tag_year).or_else(|| tagged.tags().iter().find_map(tag_year)) {
+                year = y;
+            }
             if let Some(tag) = tagged.primary_tag().or_else(|| tagged.first_tag()) {
                 if let Some(v) = tag.title().filter(|v| !v.trim().is_empty()) {
                     title = v.trim().to_string();
@@ -741,15 +814,10 @@ fn read_metadata(
                 if let Some(v) = tag.genre().filter(|v| !v.trim().is_empty()) {
                     genre = v.trim().to_string();
                 }
-                if let Some(d) = tag.date() {
-                    if d.year > 0 {
-                        year = d.year.to_string();
-                    }
-                }
             }
-            (title, artist, album, genre, year, duration)
+            (title, artist, album, genre, year, duration, isrc)
         }
-        Err(_) => (fallback_title, fallback_artist, String::new(), String::new(), String::new(), 0.0),
+        Err(_) => (fallback_title, fallback_artist, String::new(), String::new(), String::new(), 0.0, String::new()),
     }
 }
 
@@ -1021,6 +1089,7 @@ pub struct TrackResolved {
     pub album: String,
     pub genre: String,
     pub year: String,
+    pub isrc: String,
     pub duration_secs: f64,
     pub file: String,
     pub original_name: String,
@@ -1076,6 +1145,7 @@ impl TrackResolved {
             album: t.album,
             genre: t.genre,
             year: t.year,
+            isrc: t.isrc,
             duration_secs: t.duration_secs,
             file: t.file,
             original_name: t.original_name,
@@ -1194,7 +1264,7 @@ pub fn import_files(
         }
 
         let (seed_title, seed_artist) = display_name_from_file(&src);
-        let (title, artist, album, genre, year, mut duration) =
+        let (title, artist, album, genre, year, mut duration, isrc) =
             read_metadata(&src, seed_title, seed_artist);
         if duration <= 0.0 {
             // Contenedores que lofty no lee (webm…): duracion del audio.
@@ -1226,6 +1296,7 @@ pub fn import_files(
             album,
             genre,
             year,
+            isrc,
             duration_secs: (duration * 100.0).round() / 100.0,
             file: dest.to_string_lossy().into_owned(),
             original_name: src
@@ -1298,7 +1369,7 @@ fn catalog_in_place(data_dir: &Path, tracks: &mut Vec<Track>, entries: Vec<PathB
             continue;
         }
         let (seed_title, seed_artist) = display_name_from_file(&path);
-        let (title, artist, album, genre, year, duration) =
+        let (title, artist, album, genre, year, duration, isrc) =
             read_metadata(&path, seed_title, seed_artist);
         let mut rec = Track {
             id: Uuid::new_v4().simple().to_string(),
@@ -1307,6 +1378,7 @@ fn catalog_in_place(data_dir: &Path, tracks: &mut Vec<Track>, entries: Vec<PathB
             album,
             genre,
             year,
+            isrc,
             duration_secs: (duration * 100.0).round() / 100.0,
             file: path.to_string_lossy().into_owned(),
             original_name: path
@@ -1495,6 +1567,9 @@ pub struct TrackPatch {
     pub album: Option<String>,
     pub genre: Option<String>,
     pub year: Option<String>,
+    /// ISRC: se guarda normalizado; vacío lo borra; si no cumple el formato, error.
+    #[serde(default)]
+    pub isrc: Option<String>,
     pub tags: Option<Vec<String>>,
     #[serde(default)]
     pub language: Option<String>,
@@ -1630,6 +1705,14 @@ pub fn apply_patch(data_dir: &Path, id: &str, patch: TrackPatch) -> Result<Optio
         }
         if let Some(v) = patch.genre {
             t.genre = v.trim().to_string();
+        }
+        if let Some(v) = patch.isrc {
+            let v = v.trim();
+            t.isrc = if v.is_empty() {
+                String::new()
+            } else {
+                clean_isrc(v).ok_or_else(|| format!("ISRC no válido: «{v}». Debe tener 12 caracteres: 2 letras, 3 letras o cifras y 7 cifras (p. ej. ESA011900123)."))?
+            };
         }
         if let Some(v) = patch.year {
             t.year = v.trim().to_string();
@@ -1878,6 +1961,7 @@ pub struct TrackDetails {
     pub album: String,
     pub genre: String,
     pub year: String,
+    pub isrc: String,
     pub duration_secs: f64,
     pub file: String,
     pub original_name: String,
@@ -1969,6 +2053,7 @@ pub fn track_details(state: State<'_, AppState>, id: String) -> Result<TrackDeta
         album: t.album.clone(),
         genre: t.genre.clone(),
         year: t.year.clone(),
+        isrc: t.isrc.clone(),
         duration_secs: (duration * 100.0).round() / 100.0,
         file: t.file.clone(),
         original_name: t.original_name.clone(),
@@ -2678,7 +2763,7 @@ pub fn import_playlist(
         }
 
         let (seed_title, seed_artist) = display_name_from_file(&src);
-        let (title, artist, album, genre, year, duration) =
+        let (title, artist, album, genre, year, duration, isrc) =
             read_metadata(&src, seed_title, seed_artist);
 
         let file = if copy_files {
@@ -2706,6 +2791,7 @@ pub fn import_playlist(
             album,
             genre,
             year,
+            isrc,
             duration_secs: (duration * 100.0).round() / 100.0,
             file: file.to_string_lossy().into_owned(),
             original_name: src
@@ -2961,5 +3047,78 @@ mod artist_tests {
         let mut u = super::Track { artist: "A, B".into(), album_artist: "A".into(), ..Default::default() };
         super::fix_swapped_artists(&mut u);
         assert_eq!(u.artist, "A, B");
+    }
+}
+
+#[cfg(test)]
+mod isrc_year_tests {
+    use super::*;
+
+    #[test]
+    fn isrc_is_normalized_and_validated() {
+        assert_eq!(clean_isrc("es-a01-19-00123").as_deref(), Some("ESA011900123"));
+        assert_eq!(clean_isrc("USRC17607839").as_deref(), Some("USRC17607839"));
+        assert_eq!(clean_isrc("US-RC1-76-07839").as_deref(), Some("USRC17607839"));
+        assert_eq!(clean_isrc("ESA01190012"), None); // 11
+        assert_eq!(clean_isrc("1SA011900123"), None); // país con cifra
+        assert_eq!(clean_isrc("ESA0119001X3"), None); // letra en las 7 cifras
+        assert_eq!(clean_isrc(""), None);
+    }
+
+    #[test]
+    fn isrc_field_is_optional_and_named_isrc() {
+        // Ficha antigua, sin el campo
+        let t: Track = serde_json::from_str(r#"{"id":"a","title":"T","artist":"x","year":"2019","durationSecs":1,"file":"","blocks":[],"tags":[]}"#).unwrap();
+        assert_eq!(t.isrc, "");
+        assert!(!serde_json::to_string(&t).unwrap().contains("isrc"));
+        // Llega de la nube con ISRC: se conserva al volver a serializar
+        let t: Track = serde_json::from_str(r#"{"id":"a","title":"T","artist":"x","isrc":"ESA011900123","durationSecs":1,"file":"","blocks":[],"tags":[]}"#).unwrap();
+        let v: serde_json::Value = serde_json::to_value(&t).unwrap();
+        assert_eq!(v["isrc"], "ESA011900123");
+    }
+
+    #[test]
+    fn year_from_tag_dates() {
+        assert_eq!(year_of("2019").as_deref(), Some("2019"));
+        assert_eq!(year_of("2019-05-03T10:00").as_deref(), Some("2019"));
+        assert_eq!(year_of("03/05/2019").as_deref(), Some("2019"));
+        assert_eq!(year_of("12345"), None);
+        assert_eq!(year_of("0000"), None);
+    }
+
+    /// Archivos reales con etiquetas escritas por ffmpeg (si está instalado).
+    #[test]
+    fn reads_isrc_and_year_from_files() {
+        let Ok(ff) = which_ffmpeg() else { return };
+        let dir = std::env::temp_dir().join(format!("isrc-test-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        // ID3: TSRC (lo normal) y TXXX:ISRC (lo que escribe ffmpeg con «ISRC»).
+        for (ext, key, extra) in [
+            ("mp3", "TSRC", vec!["-id3v2_version", "3"]),
+            ("mp3", "TSRC", vec!["-id3v2_version", "4"]),
+            ("mp3", "ISRC", vec!["-id3v2_version", "4"]),
+            ("flac", "ISRC", vec![]),
+            ("ogg", "ISRC", vec![]),
+        ] {
+            let out = dir.join(format!("t-{key}-{}.{ext}", extra.last().unwrap_or(&"x")));
+            let mut cmd = std::process::Command::new(&ff);
+            cmd.args(["-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=d=1", "-metadata", "title=Prueba"]);
+            cmd.args(["-metadata", &format!("{key}=es-a01-19-00123"), "-metadata", "date=2019-05-03"]);
+            if ext == "ogg" {
+                cmd.args(["-c:a", "libvorbis"]);
+            }
+            cmd.args(&extra).arg(&out);
+            if !cmd.status().map(|s| s.success()).unwrap_or(false) {
+                continue; // códec no disponible
+            }
+            let (_, _, _, _, year, _, isrc) = read_metadata(&out, "x".into(), "y".into());
+            assert_eq!(isrc, "ESA011900123", "{}", out.display());
+            assert_eq!(year, "2019", "{}", out.display());
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn which_ffmpeg() -> Result<String, ()> {
+        std::process::Command::new("ffmpeg").arg("-version").output().map(|_| "ffmpeg".to_string()).map_err(|_| ())
     }
 }

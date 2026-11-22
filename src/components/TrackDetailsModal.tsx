@@ -145,6 +145,8 @@ export function TrackDetailsModal({ trackId, onClose, onEdit, navIds, onNavigate
                 <span className="prop-v">{details.genre || "—"}</span>
                 <span className="prop-k">Año</span>
                 <span className="prop-v">{details.year || "—"}</span>
+                <span className="prop-k">ISRC</span>
+                <span className="prop-v mono">{details.isrc || "—"}</span>
                 <span className="prop-k">Duración</span>
                 <span className="prop-v">{fmtTime(details.durationSecs)}</span>
                 <span className="prop-k">Normalización</span>

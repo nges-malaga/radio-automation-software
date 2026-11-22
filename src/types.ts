@@ -79,6 +79,8 @@ export interface Track {
   album: string;
   genre: string;
   year: string;
+  /** Código ISRC (12 caracteres, sin guiones) */
+  isrc?: string;
   durationSecs: number;
   /** Ruta absoluta del archivo vinculado */
   file: string;
@@ -234,6 +236,8 @@ export interface TrackPatch {
   album?: string;
   genre?: string;
   year?: string;
+  /** ISRC (12 caracteres, sin guiones); "" lo borra */
+  isrc?: string;
   tags?: string[];
   language?: string;
   disabled?: boolean;
@@ -290,6 +294,7 @@ export interface TrackDetails {
   album: string;
   genre: string;
   year: string;
+  isrc?: string;
   durationSecs: number;
   file: string;
   originalName: string;
