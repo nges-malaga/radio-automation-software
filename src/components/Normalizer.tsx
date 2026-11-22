@@ -8,6 +8,12 @@ import type { SoundMixer } from "../mixer";
 import { WindowControls } from "./WindowControls";
 import { TrackEditor } from "./TrackEditor";
 import { mediaRule, mediaTypeLabel, useMediaTypes } from "../mediaTypes";
+import { qualityBadge } from "./MusicBrowser";
+import { languageFlag, languageName } from "../languages";
+
+/** Fecha de alta en la biblioteca, dd/mm/aa. */
+const fmtAlta = (secs?: number) =>
+  secs && secs > 86_400 ? new Date(secs * 1000).toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "";
 
 type Mode = "folders" | "artists" | "blocks" | "genres" | "tags" | "types";
 type Side = "a" | "b";
@@ -476,7 +482,15 @@ function Pane({
                 >
                   <input type="checkbox" checked={isSel} readOnly tabIndex={-1} />
                   <div className="nrow-main">
-                    <span className="nrow-title">{t.title || t.originalName || "Sin título"}</span>
+                    <span className="nrow-title">
+                      {t.title || t.originalName || "Sin título"}
+                      {t.language && (
+                        <span className="lang-flag" title={languageName(t.language)}>
+                          {languageFlag(t.language)}
+                        </span>
+                      )}
+                      {qualityBadge(t)}
+                    </span>
                     <span className="nrow-sub">
                       {t.mediaType ? (
                         <span
@@ -492,6 +506,9 @@ function Pane({
                         </span>
                       ) : null}
                       {t.artist || "Artista desconocido"}
+                      {t.genre && <> · {t.genre}</>}
+                      {fmtAlta(t.addedAt) && <> · alta {fmtAlta(t.addedAt)}</>}
+                      {t.tags.length > 0 && <span className="ntags"> · {t.tags.join(", ")}</span>}
                       {t.missing && <em> · archivo no disponible</em>}
                       {t.trimManual && <em> · recorte manual</em>}
                     </span>

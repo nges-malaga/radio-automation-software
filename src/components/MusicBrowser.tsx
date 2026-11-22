@@ -88,6 +88,7 @@ import {
   IconTag,
   IconWave,
   IconSparkles,
+  IconNote,
 } from "../icons";
 import { Help } from "./Help";
 
@@ -637,6 +638,15 @@ function MusicBrowserBase({
     }
     return m;
   }, [tracks]);
+  /** Carátula de la primera canción de cada lista (si la lista no tiene portada) */
+  const blockFirstCover = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const t of tracks) {
+      if (!t.cover) continue;
+      for (const b of t.blocks) if (!m.has(b)) m.set(b, t.cover);
+    }
+    return m;
+  }, [tracks]);
 
 
   const noTagCount = useMemo(() => tracks.filter((t) => t.tags.length === 0).length, [tracks]);
@@ -1169,16 +1179,13 @@ function MusicBrowserBase({
                   }}
                   title={`${t.title} — ${t.artist}`}
                 >
+                  <span className="brow-cover" aria-hidden="true">
+                    {t.cover ? <img src={coverSrc(t.cover)} alt="" loading="lazy" draggable={false} /> : <IconNote size={13} />}
+                  </span>
                   <div className="bcell bcol-name">
                     <span className="brow-title">
                       {t.title}
-                      {t.language && (
-                        <span className="lang-flag" title={languageName(t.language)}>
-                          {languageFlag(t.language)}
-                        </span>
-                      )}
                       {isVideoFile(t.file) && <span className="badge-video">VÍDEO</span>}
-                      {qualityBadge(t)}
                       {t.missing &&
                         (t.file.trim() ? (
                           <span className="badge-missing" title={`No está en este equipo: ${t.file}. Usa «Reubicar archivo» si lo moviste.`}>
@@ -1194,19 +1201,9 @@ function MusicBrowserBase({
                         ))}
                       {t.disabled && <span className="badge-missing">desactivada</span>}
                     </span>
-                    <span className="brow-sub">
-                      {t.artist}
-                      {t.tags.length > 0 && (
-                        <span className="brow-tags">
-                          {t.tags.map((tag) => (
-                            <span key={tag} className="chip chip-tag">{tag}</span>
-                          ))}
-                        </span>
-                      )}
-                    </span>
+                    <span className="brow-sub">{t.artist}</span>
                   </div>
                   <span className="bcell bcol-album" title={t.album}>{t.album || "—"}</span>
-                  <span className="bcell bcol-genre" title={t.genre}>{t.genre || "—"}</span>
                   <span className="bcell bcol-added">{fmtAdded(t.addedAt)}</span>
                   {last ?? <span className="bcell bcol-dur">{fmtTime(t.durationSecs)}</span>}
                   <div className="brow-acts">
@@ -1464,7 +1461,16 @@ function MusicBrowserBase({
                         }}
                       />
                     ) : (
-                      <span className="nav-name">{b.name}</span>
+                      <>
+                        <span className="nav-cover" aria-hidden="true">
+                          {b.cover || blockFirstCover.get(b.id) ? (
+                            <img src={coverSrc(b.cover || blockFirstCover.get(b.id)!)} alt="" loading="lazy" draggable={false} />
+                          ) : (
+                            b.name.slice(0, 1).toUpperCase()
+                          )}
+                        </span>
+                        <span className="nav-name">{b.name}</span>
+                      </>
                     )}
                     <span className="nav-count">{blockCounts.get(b.id) ?? 0}</span>
                     <span className="nav-block-acts">
@@ -1695,6 +1701,7 @@ function MusicBrowserBase({
           )}
 
           <div className="browser-cols">
+            <span aria-hidden="true" />
             <button type="button" className="bcol bcol-name" onClick={() => toggleSort("title")}>
               Nombre
               {sort.key === "title" && <span className="sort-mark">{sort.dir === 1 ? "↑" : "↓"}</span>}
@@ -1702,10 +1709,6 @@ function MusicBrowserBase({
             <button type="button" className="bcol" onClick={() => toggleSort("album")}>
               Álbum
               {sort.key === "album" && <span className="sort-mark">{sort.dir === 1 ? "↑" : "↓"}</span>}
-            </button>
-            <button type="button" className="bcol bcol-genre" onClick={() => toggleSort("genre")}>
-              Estilo
-              {sort.key === "genre" && <span className="sort-mark">{sort.dir === 1 ? "↑" : "↓"}</span>}
             </button>
             <button type="button" className="bcol bcol-added" onClick={() => toggleSort("added")} title="Fecha en que entró en la biblioteca">
               Alta
