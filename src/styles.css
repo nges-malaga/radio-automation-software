@@ -5151,6 +5151,10 @@ body[data-dnd="fx"] .mx-fx-cell.dnd-over .mx-fx-add { box-shadow: none; border-c
 .badge-energy .energy-dots { letter-spacing: 0.5px; }
 .badge-noenergy { font-size: 10.5px; color: var(--text-faint); border: 1px dashed var(--line-strong); border-radius: 3px; padding: 0 4px; }
 .badge-mtype { font-size: 10px; font-weight: 700; letter-spacing: 0.6px; color: #ffb84d; background: #ffb84d1f; border-radius: 3px; padding: 1px 5px; }
+/* Rotación: hueco que elige una canción al azar de una lista */
+.badge-slot { font-size: 10px; font-weight: 700; letter-spacing: 0.6px; color: #c08bff; background: #c08bff1f; border-radius: 3px; padding: 1px 5px; white-space: nowrap; }
+.plrow-slot-ph { position: absolute; inset: 0; display: grid; place-items: center; font-size: 18px; color: #c08bff; background: #c08bff1a; }
+.pl-loop-on { color: #c08bff; border-color: #c08bff; background: #c08bff1a; }
 .nav-section { margin: 10px 8px 3px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: var(--text-faint); }
 .erange { display: inline-flex; align-items: center; gap: 3px; user-select: none; }
 .erange-lvl {

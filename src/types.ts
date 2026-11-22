@@ -337,6 +337,10 @@ export interface Playlist {
   trackIds: string[];
   /** Metadatos por posicion (anuncios/eventos); null = los de la cancion */
   meta?: (StreamMeta | null)[];
+  /** Rotación por posición: lista de la que sale una canción al azar (null = fija) */
+  slots?: (string | null)[];
+  /** Al terminar, vuelve a empezar (sin AutoDJ) */
+  loop?: boolean;
 }
 
 export interface PlaylistRow {
@@ -356,6 +360,10 @@ export interface PlaylistRow {
   energy?: number;
   /** Tipo de medio ("" = música) */
   mediaType?: MediaType;
+  /** Posición en la lista (trackIds) */
+  pos?: number;
+  /** Hueco de rotación: id de la lista de la que sale al azar */
+  slot?: string;
 }
 
 export type CampaignKind = "ads" | "jingle";

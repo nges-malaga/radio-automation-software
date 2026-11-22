@@ -30,8 +30,13 @@ interface PlaylistZoneProps {
   onReorder: (from: number, to: number) => void;
   onRemove: (index: number) => void;
   onDropTrack: (trackId: string, at: number) => void;
-  /** Suelta una lista entero: todas sus canciones a partir de `at` */
-  onDropBlock?: (blockId: string, at: number) => void;
+  /** Suelta una lista: un hueco de rotación (una al azar); con Ctrl/Alt (`copy`), todas sus canciones */
+  onDropBlock?: (blockId: string, at: number, copy?: boolean) => void;
+  /** Bucle: al terminar vuelve a empezar */
+  loop?: boolean;
+  onToggleLoop?: () => void;
+  /** Aviso junto al bucle (p. ej. sin efecto con el AutoDJ) */
+  loopNote?: string;
   /** Archivos del Explorador: se importan si hace falta y entran en `at` */
   onDropFiles?: (paths: string[], at: number) => void;
   onPreview: (index: number) => void;
@@ -86,6 +91,9 @@ export function PlaylistZone({
   onGenerate,
   pastVisible,
   leavingRow,
+  loop = false,
+  onToggleLoop,
+  loopNote = "",
 }: PlaylistZoneProps) {
   const PAST_VISIBLE = Math.max(0, Math.round(pastVisible));
   const isAir = activeId === airId;
@@ -103,11 +111,11 @@ export function PlaylistZone({
     };
     const zone = {
       accepts: (p: { kind: string; blockId?: string }) => p.kind === "track" || p.kind === "row" || p.kind === "files" || (p.kind === "blockItem" && !!p.blockId),
-      drop: (p: import("../dnd").DragPayload, el: HTMLElement, pos: { after: boolean }) => {
+      drop: (p: import("../dnd").DragPayload, el: HTMLElement, pos: { after: boolean; copy: boolean }) => {
         const to = at(el, pos.after);
         const h = dropRef.current;
         if (p.kind === "track") h.onDropTrack(p.trackId, to);
-        else if (p.kind === "blockItem") h.onDropBlock?.(p.blockId, to);
+        else if (p.kind === "blockItem") h.onDropBlock?.(p.blockId, to, pos.copy);
         else if (p.kind === "files") h.onDropFiles?.(p.paths, to);
         else if (p.kind === "row") {
           const t = p.index < to ? to - 1 : to;
@@ -182,6 +190,11 @@ export function PlaylistZone({
   const totalSecs = rows.reduce((acc, r) => acc + r.durationSecs, 0);
 
   const blockName = (id: string) => blocks.find((b) => b.id === id)?.name ?? "Lista";
+  /** Hueco de rotación aún por sonar: se ve la lista (su portada), no la canción. */
+  const slotOf = (r: PlaylistRow, i: number): Block | undefined =>
+    r.slot && i !== playingRow && !(playingRow >= 0 && i < playingRow)
+      ? blocks.find((b) => b.id === r.slot) ?? { id: r.slot, name: "Lista", trackCount: 0 }
+      : undefined;
 
   // Cierra el menu contextual con Escape.
   useEffect(() => {
@@ -253,6 +266,17 @@ export function PlaylistZone({
               {active?.name}
             </button>
           )}
+          {onToggleLoop && (
+            <button
+              type="button"
+              className={`btn btn-sm pl-loop ${loop ? "pl-loop-on" : ""}`}
+              aria-pressed={loop}
+              onClick={onToggleLoop}
+              title={loop ? "Bucle activado: al terminar, vuelve a empezar (clic para quitarlo)" : "Bucle: al terminar la lista, vuelve a empezar (como una rueda de programación)"}
+            >
+              ⟲ Bucle
+            </button>
+          )}
           {rows.length > 0 && (
             <button
               type="button"
@@ -283,6 +307,18 @@ export function PlaylistZone({
             <span className="auto-note">{autoIds.size} añadidas por el AutoDJ</span>
           </>
         )}
+        {rows.some((r) => r.slot) && (
+          <>
+            <span className="sep">·</span>
+            <span>{rows.filter((r) => r.slot).length} en rotación</span>
+          </>
+        )}
+        {loop && loopNote && (
+          <>
+            <span className="sep">·</span>
+            <span className="pl-notair">{loopNote}</span>
+          </>
+        )}
       </div>
 
       {nextElsewhere && (
@@ -310,7 +346,8 @@ export function PlaylistZone({
           data-drop-zone="playlist-end"
         >
           Lista vacía. Arrastra canciones desde la biblioteca o activa el
-          AutoDJ para que se llene sola.
+          AutoDJ para que se llene sola. Si sueltas una lista, entra como rotación
+          (una canción suya al azar); con Ctrl, todas sus canciones.
         </div>
       ) : (
         <div className="rows flex-1" ref={rowsRef} data-drop-zone="playlist-end">
@@ -365,7 +402,13 @@ export function PlaylistZone({
                 <span className="plrow-cover-ph">
                   <IconNote size={14} />
                 </span>
-                {r.cover && (
+                {slotOf(r, i) ? (
+                  slotOf(r, i)!.cover ? (
+                    <img src={trackUrl({ file: slotOf(r, i)!.cover! })} alt="" loading="lazy" onError={(e) => e.currentTarget.remove()} />
+                  ) : (
+                    <span className="plrow-slot-ph">⟲</span>
+                  )
+                ) : r.cover && (
                   <img
                     src={trackUrl({ file: r.cover })}
                     alt=""
@@ -375,8 +418,26 @@ export function PlaylistZone({
                 )}
               </button>
               <button type="button" className="plrow-main" onDoubleClick={() => onPlayRow(i)} title="Doble clic: emitir esta canción">
+                {slotOf(r, i) ? (
+                  <>
+                    <span className="plrow-line">
+                      <span className="plrow-title">{slotOf(r, i)!.name}</span>
+                      <span className="badge-energy badge-slot" title="Rotación: suena una canción al azar de esta lista; cuál, se ve en SIGUIENTE">
+                        ROTACIÓN
+                      </span>
+                      {i === nextRow && <span className="badge-next">SIGUIENTE</span>}
+                    </span>
+                    <span className="plrow-sub">Una al azar de la lista</span>
+                  </>
+                ) : (
+                <>
                 <span className="plrow-line">
                   <span className="plrow-title">{r.title}</span>
+                  {r.slot && (
+                    <span className="badge-energy badge-slot" title={`Rotación de «${blockName(r.slot)}»`}>
+                      ⟲ {blockName(r.slot)}
+                    </span>
+                  )}
                   {r.video && <span className="badge-video">VÍDEO</span>}
                   {autoIds.has(r.id) && <span className="badge-auto">AUTO</span>}
                   {r.mediaType ? (
@@ -403,9 +464,11 @@ export function PlaylistZone({
                   {i === leavingRow && <span className="badge-leaving">SALE AL TERMINAR</span>}
                 </span>
                 <span className="plrow-sub">{r.artist}</span>
+                </>
+                )}
               </button>
               <div className="plrow-blocks" ref={blockMenu === r.id ? blockMenuRef : undefined}>
-                {r.blocks.map((blockId) => (
+                {(slotOf(r, i) ? [] : r.blocks).map((blockId) => (
                   <button
                     key={blockId}
                     type="button"

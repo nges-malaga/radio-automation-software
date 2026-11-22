@@ -412,7 +412,33 @@ function alignPlaylistMeta(
   });
 }
 
-/** Filas de una lista con los datos de la biblioteca (pistas que existen). */
+/** Igual que alignPlaylistMeta, para los huecos de rotación. */
+function alignSlots(
+  oldIds: string[],
+  oldSlots: (string | null | undefined)[] | undefined,
+  newIds: string[],
+  overrides?: (id: string, index: number) => string | null | undefined,
+): (string | null)[] | undefined {
+  if (!oldSlots?.some(Boolean) && !overrides) return undefined;
+  const slots = oldSlots ?? [];
+  const used = new Set<number>();
+  const out = newIds.map((id, index) => {
+    const o = overrides?.(id, index);
+    if (o !== undefined) return o;
+    if (oldIds[index] === id && !used.has(index)) {
+      used.add(index);
+      return slots[index] ?? null;
+    }
+    const found = oldIds.findIndex((oldId, oldIndex) => !used.has(oldIndex) && oldId === id);
+    if (found >= 0) {
+      used.add(found);
+      return slots[found] ?? null;
+    }
+    return null;
+  });
+  return out.some(Boolean) ? out : undefined;
+}
+
 /** Posición de `id` más cercana a `near` (una pista puede repetirse en la lista). */
 function nearestIndex(ids: string[], id: string, near: number): number {
   let best = -1;
@@ -446,6 +472,8 @@ function rowsOf(pl: Playlist | undefined, tracks: Track[]): PlaylistRow[] {
         meta,
         energy: t.energy ?? 0,
         mediaType: t.mediaType ?? "",
+        pos: index,
+        slot: pl.slots?.[index] ?? undefined,
       },
     ];
   });
@@ -519,6 +547,8 @@ export default function App() {
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [activeId, setActiveId] = useState("");
   const [playingRow, setPlayingRow] = useState(-1);
+  /** Bucle de la lista que suena (solo sin AutoDJ, que ya la rellena por el final) */
+  const loopWantedRef = useRef(false);
   const [paused, setPaused] = useState(true);
   const [pos, setPos] = useState({ cur: 0, total: 0 });
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
@@ -847,7 +877,7 @@ export default function App() {
       const s = settingsRef.current;
       nat.fadeSeconds = s.fadeSeconds;
       nat.fadeInNext = s.fadeInNext === true;
-      nat.loop = false;
+      nat.loop = loopWantedRef.current;
       nat.silenceSkip = s.silenceDetection;
       nat.silenceThresholdDb = s.silenceThresholdDb ?? -55;
       const byId = new Map(tracksRef.current.map((t) => [t.id, t]));
@@ -889,6 +919,11 @@ export default function App() {
     () => playlists.find((p) => p.id === activeId) ?? playlists[0],
     [playlists, activeId],
   );
+  const loopWanted = !!active?.loop && !autopilotOn;
+  loopWantedRef.current = loopWanted;
+  useEffect(() => {
+    if (playerRef.current) playerRef.current.loop = loopWanted;
+  }, [loopWanted, native]);
 
   // Evento de franja AutoDJ activo. Si varios coinciden, manda el que
   // empezó más tarde (y a igualdad, el último de la lista).
@@ -1318,7 +1353,7 @@ export default function App() {
     if (p) {
       p.fadeSeconds = settings.fadeSeconds;
       p.fadeInNext = settings.fadeInNext === true;
-      p.loop = false;
+      p.loop = loopWantedRef.current;
       p.silenceSkip = settings.silenceDetection;
       p.silenceThresholdDb = settings.silenceThresholdDb ?? -55;
       p.setVolume(settings.masterVolume);
@@ -1848,14 +1883,18 @@ export default function App() {
       listId: string,
       fn: (ids: string[]) => string[],
       overrides?: (id: string, index: number) => StreamMeta | null,
+      slotOverrides?: (id: string, index: number) => string | null | undefined,
+      extra?: Partial<Playlist>,
     ) => {
       const pl = playlistsRef.current.find((p) => p.id === listId);
       if (!pl) return;
       const ids = fn(pl.trackIds);
       const updated: Playlist = {
         ...pl,
+        ...extra,
         trackIds: ids,
         meta: alignPlaylistMeta(pl.trackIds, pl.meta, ids, overrides),
+        slots: alignSlots(pl.trackIds, pl.slots, ids, slotOverrides),
       };
       // La referencia se actualiza ya: dos cambios seguidos (ordenar mientras
       // el AutoDJ añade) parten cada uno del anterior y no se pisan.
@@ -1989,8 +2028,80 @@ export default function App() {
   );
 
   /** Suelta una lista entero en la lista: sus canciones (las que no estan ya). */
+  /** Una canción al azar de una lista para un hueco de rotación (con las reglas del AutoDJ). */
+  const pickForSlot = useCallback(async (blockId: string, others: string[]): Promise<string | null> => {
+    try {
+      const [id] = await autoPick(others, 1, "block", blockId);
+      // Si la lista ya está entera en la playlist, el AutoDJ caería a toda la biblioteca: no vale.
+      if (id && tracksRef.current.find((t) => t.id === id)?.blocks.includes(blockId)) return id;
+    } catch {
+      /* sin motor de selección: al azar */
+    }
+    const pool = tracksRef.current.filter((t) => t.blocks.includes(blockId) && !t.disabled && !t.missing);
+    const fresh = pool.filter((t) => !others.includes(t.id));
+    const from = fresh.length ? fresh : pool;
+    return from.length ? from[Math.floor(Math.random() * from.length)].id : null;
+  }, []);
+
+  // Rotación con bucle: el hueco que acaba de sonar elige ya otra canción
+  // para la próxima vuelta (con las reglas del AutoDJ).
+  const prevPlayRowRef = useRef(-1);
+  useEffect(() => {
+    const prev = prevPlayRowRef.current;
+    prevPlayRowRef.current = playingRow;
+    if (prev < 0 || prev === playingRow) return;
+    const pl = playlistsRef.current.find((p) => p.id === activeIdRef.current);
+    if (!pl?.loop || !pl.slots?.some(Boolean)) return;
+    const row = rowsOf(pl, tracksRef.current)[prev];
+    if (!row?.slot || row.pos === undefined || prev === playingRow) return;
+    const pos = row.pos;
+    const blockId = row.slot;
+    const oldId = row.id;
+    void pickForSlot(blockId, pl.trackIds.filter((_, i) => i !== pos)).then((id) => {
+      if (!id || id === oldId) return;
+      void mutateById(
+        pl.id,
+        (cur) => (cur[pos] === oldId ? cur.map((x, i) => (i === pos ? id : x)) : cur),
+        undefined,
+        (_x, i) => (i === pos ? blockId : undefined),
+      );
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playingRow]);
+
+  /** Suelta una lista como hueco de rotación: suena una canción suya al azar. */
+  const insertSlot = useCallback(
+    async (blockId: string, at: number) => {
+      const listId = viewIdRef.current;
+      const pl = playlistsRef.current.find((p) => p.id === listId);
+      if (!pl) return;
+      const name = blocksRef.current.find((b) => b.id === blockId)?.name ?? "lista";
+      const id = await pickForSlot(blockId, pl.trackIds);
+      if (!id) {
+        showToast(`«${name}» no tiene canciones que se puedan emitir`);
+        return;
+      }
+      // `at` es una fila; en la lista puede haber pistas ocultas (desactivadas).
+      const rows = rowsOf(pl, tracksRef.current);
+      const pos = at >= rows.length ? pl.trackIds.length : rows[at]?.pos ?? pl.trackIds.length;
+      await mutateById(
+        listId,
+        (cur) => [...cur.slice(0, pos), id, ...cur.slice(pos)],
+        undefined,
+        (_id, index) => (index === pos ? blockId : undefined),
+      );
+      showToast(`Rotación de «${name}»: sonará una canción suya al azar`);
+    },
+    [mutateById, pickForSlot, showToast],
+  );
+
   const dropBlockAt = useCallback(
-    (blockId: string, at: number) => {
+    (blockId: string, at: number, copy = false) => {
+      // Sin Ctrl/Alt: hueco de rotación (una al azar, como en SAM). Con Ctrl/Alt: todas sus canciones.
+      if (!copy) {
+        void insertSlot(blockId, at);
+        return;
+      }
       const ids = tracksRef.current.filter((t) => t.blocks.includes(blockId) && !t.missing && !t.disabled).map((t) => t.id);
       if (ids.length === 0) {
         showToast("Esa lista no tiene canciones");
@@ -2006,7 +2117,7 @@ export default function App() {
         showToast(added ? `${added} canciones de «${name}» añadidas a la lista` : `Canciones de «${name}» colocadas en la lista`);
       });
     },
-    [mutateView, showToast],
+    [mutateView, showToast, insertSlot],
   );
 
   /** Cue de una pista de la lista por la salida de monitorizacion. */
@@ -2146,6 +2257,8 @@ export default function App() {
   useEffect(() => {
     const keep = settings.keepPlayed ?? 0;
     if (keep <= 0 || workstation || !dataLoadedRef.current || !active || playingRow < 0) return;
+    // En bucle la lista entera vuelve a sonar: no se recorta lo emitido.
+    if (loopWantedRef.current) return;
     if (playingRow <= keep) return;
     const listId = active.id;
     const currentId = rows[playingRow]?.id;
@@ -5058,6 +5171,12 @@ export default function App() {
                   onClearNext={() => setNextPick(null)}
                   onGenerate={() => void generateView()}
                   pastVisible={settings.pastVisible ?? 5}
+                  loop={!!view?.loop}
+                  onToggleLoop={() => {
+                    if (!view) return;
+                    void mutateById(view.id, (ids) => ids, undefined, undefined, { loop: !view.loop });
+                  }}
+                  loopNote={view?.id === active?.id && autopilotOn ? "con el AutoDJ activo no hay bucle (la rellena él)" : ""}
                   leavingRow={
                     removeAfter &&
                     view?.id === removeAfter.listId &&

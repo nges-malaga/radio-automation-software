@@ -18,6 +18,14 @@ pub struct Playlist {
     /// Metadatos por posicion (anuncios/eventos); None = los de la cancion.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub meta: Vec<Option<crate::settings::StreamMeta>>,
+    /// Rotación por posición: id de la lista de la que sale una canción al
+    /// azar en ese hueco (None = canción fija). La canción elegida está en
+    /// `track_ids`; se vuelve a elegir cada vez que suena.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slots: Vec<Option<String>>,
+    /// Al terminar, volver a empezar (sin AutoDJ).
+    #[serde(default, rename = "loop", skip_serializing_if = "std::ops::Not::not")]
+    pub loop_list: bool,
 }
 
 fn playlists_dir(data_dir: &PathBuf) -> PathBuf {
@@ -61,6 +69,8 @@ pub fn list_playlists(state: State<'_, AppState>) -> Result<Vec<Playlist>, Strin
             name: DEFAULT_PLAYLIST_NAME.to_string(),
             track_ids: Vec::new(),
             meta: Vec::new(),
+            slots: Vec::new(),
+            loop_list: false,
         };
         store(&state.data_dir, &first)?;
         result.push(first);
