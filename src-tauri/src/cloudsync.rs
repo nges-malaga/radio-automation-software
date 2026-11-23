@@ -436,25 +436,60 @@ fn images_in(sh: &Shared, join: &crate::cloud::JoinFile, v: &mut Value) {
     match v {
         Value::String(x) if x.starts_with("media:") => {
             let name = &x[6..];
-            let (stem, _) = name.split_once('.').unwrap_or((name, ""));
+            let (stem, ext) = name.split_once('.').unwrap_or((name, ""));
             if !is_sha(stem) || name.contains(['/', '\\']) {
                 return;
             }
             let dir = sh.dir.join(IMG_DIR);
-            let path = dir.join(name);
-            if !path.is_file() {
-                let _ = fs::create_dir_all(&dir);
-                let auth = format!("Bearer {}", join.token);
-                if download_one(&agent(), &auth, &join.api, stem, &path, sh).is_err() {
-                    return; // se queda la referencia; se reintenta en la próxima pasada
+            let auth = format!("Bearer {}", join.token);
+            let path = if ext.is_empty() {
+                // Versiones antiguas: «media:<sha256>» sin extensión. Se deduce
+                // por el contenido y se guarda con ella.
+                match ["jpg", "png", "webp", "gif"].iter().map(|e| dir.join(format!("{stem}.{e}"))).find(|p| p.is_file()) {
+                    Some(p) => p,
+                    None => {
+                        let _ = fs::create_dir_all(&dir);
+                        let raw = dir.join(stem);
+                        if !raw.is_file() && download_one(&agent(), &auth, &join.api, stem, &raw, sh).is_err() {
+                            return;
+                        }
+                        match image_ext_of(&raw) {
+                            Some(e) => {
+                                let named = dir.join(format!("{stem}.{e}"));
+                                if fs::rename(&raw, &named).is_err() {
+                                    return;
+                                }
+                                named
+                            }
+                            // No es una imagen reconocible: no se usa como carátula.
+                            None => return,
+                        }
+                    }
                 }
-            }
+            } else {
+                let path = dir.join(name);
+                if !path.is_file() {
+                    let _ = fs::create_dir_all(&dir);
+                    if download_one(&agent(), &auth, &join.api, stem, &path, sh).is_err() {
+                        return; // se queda la referencia; se reintenta en la próxima pasada
+                    }
+                }
+                path
+            };
             *x = path.to_string_lossy().into_owned();
         }
         Value::Object(m) => m.values_mut().for_each(|x| images_in(sh, join, x)),
         Value::Array(a) => a.iter_mut().for_each(|x| images_in(sh, join, x)),
         _ => {}
     }
+}
+
+/// Extensión de una imagen por su contenido (JPEG, PNG, WebP o GIF).
+fn image_ext_of(path: &Path) -> Option<&'static str> {
+    use std::io::Read;
+    let mut head = [0u8; 16];
+    let n = File::open(path).ok()?.read(&mut head).ok()?;
+    crate::library::sniff_image_ext(&head[..n])
 }
 
 /// Sube las imágenes que aún no están en la nube.

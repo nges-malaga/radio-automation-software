@@ -475,16 +475,54 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     hash
 }
 
+/// Álbumes «cajón» que agrupan canciones distintas (sencillos sueltos,
+/// recopilaciones sin nombre…): ahí cada canción lleva su propia carátula.
+fn is_generic_album(album: &str) -> bool {
+    matches!(
+        album,
+        "sencillo" | "sencillos" | "single" | "singles" | "varios" | "various" | "various artists" | "varios artistas"
+            | "desconocido" | "album desconocido" | "álbum desconocido" | "unknown album" | "unknown" | "sin album" | "sin álbum"
+            | "otros" | "misc" | "miscellaneous"
+    )
+}
+
 /// La portada pertenece al album, no a la cancion. Todas las pistas del
-/// mismo album comparten un unico archivo en `covers/`. Sin album no hay
-/// forma de agrupar, asi que se guarda una por cancion.
+/// mismo album comparten un unico archivo en `covers/`. Sin album (o con un
+/// album genérico como «Sencillos») no hay forma de agrupar, asi que se
+/// guarda una por cancion.
 fn cover_key(track: &Track) -> String {
     let album = normalize_cover_album(&track.album);
-    if album.is_empty() {
+    if album.is_empty() || is_generic_album(&album) {
         format!("track-{}", track.id)
     } else {
         format!("album-{:016x}", fnv1a(album.as_bytes()))
     }
+}
+
+fn file_image_ext(path: &Path) -> Option<&'static str> {
+    use std::io::Read;
+    let mut head = [0u8; 16];
+    let n = fs::File::open(path).ok()?.read(&mut head).ok()?;
+    sniff_image_ext(&head[..n])
+}
+
+/// Dónde está de verdad la carátula de una canción: en `covers/` o donde
+/// diga su ruta completa (p. ej. `maestro-imagenes/`, bajada de la nube).
+fn cover_source(data_dir: &Path, cover: &str) -> Option<PathBuf> {
+    let c = cover.trim();
+    if c.is_empty() || c.starts_with("media:") {
+        return None;
+    }
+    let p = Path::new(c);
+    if p.is_absolute() && p.is_file() {
+        return Some(p.to_path_buf());
+    }
+    let in_covers = covers_dir(data_dir).join(p.file_name()?);
+    if in_covers.is_file() {
+        return Some(in_covers);
+    }
+    let rel = data_dir.join(p);
+    rel.is_file().then_some(rel)
 }
 
 fn is_cover_ext(ext: &str) -> bool {
@@ -552,21 +590,17 @@ fn extract_cover(data_dir: &Path, audio: &Path, stem: &str) -> Option<String> {
     Some(name)
 }
 
-/// Copia una portada antigua (guardada por cancion) al nombre del album.
+/// Copia la carátula de una canción (esté donde esté) al nombre del álbum.
+/// Sin extensión, se deduce por el contenido.
 fn copy_cover_to_key(data_dir: &Path, cover: &str, stem: &str) -> Option<String> {
-    let source_name = Path::new(cover.trim()).file_name()?.to_str()?;
-    let source = covers_dir(data_dir).join(source_name);
-    if !source.is_file() {
-        return None;
-    }
+    let source = cover_source(data_dir, cover)?;
     let ext = source
         .extension()
         .and_then(|e| e.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    if !is_cover_ext(&ext) {
-        return None;
-    }
+        .map(|e| e.to_ascii_lowercase())
+        .filter(|e| is_cover_ext(e))
+        .or_else(|| file_image_ext(&source).map(String::from))?;
+    let ext = if ext == "jpeg" { "jpg".to_string() } else { ext };
     let dir = covers_dir(data_dir);
     fs::create_dir_all(&dir).ok()?;
     let name = format!("{stem}.{ext}");
@@ -628,11 +662,17 @@ fn sync_album_cover(data_dir: &Path, tracks: &mut [Track], key: &str) -> bool {
 
     let mut changed = false;
     for index in indices {
-        let next = chosen.clone().unwrap_or_default();
         let track = &mut tracks[index];
-        if track.cover != next {
-            track.cover = next;
-            changed = true;
+        match &chosen {
+            Some(next) => {
+                if &track.cover != next {
+                    track.cover = next.clone();
+                    changed = true;
+                }
+            }
+            // No se ha podido copiar ni sacar del audio: la carátula que ya
+            // tuviera se deja tal cual (nunca se vacía por esto).
+            None => {}
         }
         if !track.cover_checked {
             track.cover_checked = true;
@@ -1760,8 +1800,8 @@ pub fn apply_patch(data_dir: &Path, id: &str, patch: TrackPatch) -> Result<Optio
     Ok(note)
 }
 
-/// Extension de imagen por su firma (para portadas descargadas).
-fn sniff_image_ext(data: &[u8]) -> Option<&'static str> {
+/// Extension de imagen por su firma (portadas descargadas o sin extensión).
+pub fn sniff_image_ext(data: &[u8]) -> Option<&'static str> {
     if data.starts_with(&[0x89, b'P', b'N', b'G']) {
         Some("png")
     } else if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
@@ -2952,6 +2992,75 @@ mod tests {
             .collect();
         files.sort();
         assert_eq!(files, vec![tracks[0].cover.clone()]);
+        fs::remove_dir_all(data).unwrap();
+    }
+
+    /// Caso real: la carátula llega de la nube y se baja a maestro-imagenes/.
+    /// Antes, al ordenar por álbum no se encontraba en covers/ y se vaciaba
+    /// (y la ficha vacía se subía a la nube, borrándola allí también).
+    #[test]
+    fn carátula_bajada_de_la_nube_no_se_borra() {
+        let data = cover_test_dir("nube");
+        let img = data.join("maestro-imagenes");
+        fs::create_dir_all(&img).unwrap();
+        let sha = "a".repeat(64);
+        let jpeg = [0xFF, 0xD8, 0xFF, 0xE0, 0, 0x10, b'J', b'F', b'I', b'F', 0, 1];
+        let src = img.join(format!("{sha}.jpg"));
+        fs::write(&src, jpeg).unwrap();
+
+        // Sin archivo de audio (aún no bajado): no se puede extraer nada de él.
+        let mut tracks = vec![track("uno", "Libertad", &src.to_string_lossy())];
+        let key = cover_key(&tracks[0]);
+        sync_album_cover(&data, &mut tracks, &key);
+        assert!(!tracks[0].cover.is_empty(), "la carátula se ha vaciado");
+        assert!(data.join("covers").join(&tracks[0].cover).is_file());
+        assert_eq!(fs::read(data.join("covers").join(&tracks[0].cover)).unwrap(), jpeg);
+        fs::remove_dir_all(data).unwrap();
+    }
+
+    #[test]
+    fn carátula_sin_extensión_se_reconoce_por_el_contenido() {
+        let data = cover_test_dir("sinext");
+        let img = data.join("maestro-imagenes");
+        fs::create_dir_all(&img).unwrap();
+        let png = [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n', 0, 0, 0, 13];
+        let src = img.join("b".repeat(64));
+        fs::write(&src, png).unwrap();
+        let mut tracks = vec![track("uno", "Disco", &src.to_string_lossy())];
+        let key = cover_key(&tracks[0]);
+        sync_album_cover(&data, &mut tracks, &key);
+        assert_eq!(tracks[0].cover, format!("{key}.png"));
+        fs::remove_dir_all(data).unwrap();
+    }
+
+    #[test]
+    fn si_no_se_puede_copiar_la_carátula_no_se_toca() {
+        let data = cover_test_dir("intacta");
+        // Referencia a un archivo que no está (ni en covers/ ni en otra parte)
+        let mut tracks = vec![track("uno", "Disco", "/no/existe/caratula.jpg")];
+        tracks[0].cover_checked = false;
+        let key = cover_key(&tracks[0]);
+        sync_album_cover(&data, &mut tracks, &key);
+        assert_eq!(tracks[0].cover, "/no/existe/caratula.jpg");
+        fs::remove_dir_all(data).unwrap();
+    }
+
+    #[test]
+    fn en_sencillos_cada_canción_lleva_su_carátula() {
+        let data = cover_test_dir("sencillos");
+        let covers = data.join("covers");
+        fs::write(covers.join("uno.jpg"), [0xFF, 0xD8, 0xFF, 1]).unwrap();
+        fs::write(covers.join("dos.jpg"), [0xFF, 0xD8, 0xFF, 2]).unwrap();
+        let mut tracks = vec![track("uno", "Sencillos", "uno.jpg"), track("dos", "  SINGLES ", "dos.jpg"), track("tres", "Sencillos", "dos.jpg")];
+        assert_ne!(cover_key(&tracks[0]), cover_key(&tracks[2]));
+        for key in tracks.iter().map(cover_key).collect::<Vec<_>>() {
+            sync_album_cover(&data, &mut tracks, &key);
+        }
+        assert_ne!(tracks[0].cover, tracks[1].cover);
+        assert_eq!(fs::read(covers.join(&tracks[0].cover)).unwrap(), [0xFF, 0xD8, 0xFF, 1]);
+        assert_eq!(fs::read(covers.join(&tracks[1].cover)).unwrap(), [0xFF, 0xD8, 0xFF, 2]);
+        // Un álbum normal sigue compartiendo carátula
+        assert_eq!(cover_key(&track("a", "Libertad", "")), cover_key(&track("b", "libertad", "")));
         fs::remove_dir_all(data).unwrap();
     }
 
