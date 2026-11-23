@@ -475,24 +475,12 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     hash
 }
 
-/// Álbumes «cajón» que agrupan canciones distintas (sencillos sueltos,
-/// recopilaciones sin nombre…): ahí cada canción lleva su propia carátula.
-fn is_generic_album(album: &str) -> bool {
-    matches!(
-        album,
-        "sencillo" | "sencillos" | "single" | "singles" | "varios" | "various" | "various artists" | "varios artistas"
-            | "desconocido" | "album desconocido" | "álbum desconocido" | "unknown album" | "unknown" | "sin album" | "sin álbum"
-            | "otros" | "misc" | "miscellaneous"
-    )
-}
-
 /// La portada pertenece al album, no a la cancion. Todas las pistas del
-/// mismo album comparten un unico archivo en `covers/`. Sin album (o con un
-/// album genérico como «Sencillos») no hay forma de agrupar, asi que se
-/// guarda una por cancion.
+/// mismo album comparten un unico archivo en `covers/`. Sin album no hay
+/// forma de agrupar, asi que se guarda una por cancion.
 fn cover_key(track: &Track) -> String {
     let album = normalize_cover_album(&track.album);
-    if album.is_empty() || is_generic_album(&album) {
+    if album.is_empty() {
         format!("track-{}", track.id)
     } else {
         format!("album-{:016x}", fnv1a(album.as_bytes()))
@@ -3042,25 +3030,6 @@ mod tests {
         let key = cover_key(&tracks[0]);
         sync_album_cover(&data, &mut tracks, &key);
         assert_eq!(tracks[0].cover, "/no/existe/caratula.jpg");
-        fs::remove_dir_all(data).unwrap();
-    }
-
-    #[test]
-    fn en_sencillos_cada_canción_lleva_su_carátula() {
-        let data = cover_test_dir("sencillos");
-        let covers = data.join("covers");
-        fs::write(covers.join("uno.jpg"), [0xFF, 0xD8, 0xFF, 1]).unwrap();
-        fs::write(covers.join("dos.jpg"), [0xFF, 0xD8, 0xFF, 2]).unwrap();
-        let mut tracks = vec![track("uno", "Sencillos", "uno.jpg"), track("dos", "  SINGLES ", "dos.jpg"), track("tres", "Sencillos", "dos.jpg")];
-        assert_ne!(cover_key(&tracks[0]), cover_key(&tracks[2]));
-        for key in tracks.iter().map(cover_key).collect::<Vec<_>>() {
-            sync_album_cover(&data, &mut tracks, &key);
-        }
-        assert_ne!(tracks[0].cover, tracks[1].cover);
-        assert_eq!(fs::read(covers.join(&tracks[0].cover)).unwrap(), [0xFF, 0xD8, 0xFF, 1]);
-        assert_eq!(fs::read(covers.join(&tracks[1].cover)).unwrap(), [0xFF, 0xD8, 0xFF, 2]);
-        // Un álbum normal sigue compartiendo carátula
-        assert_eq!(cover_key(&track("a", "Libertad", "")), cover_key(&track("b", "libertad", "")));
         fs::remove_dir_all(data).unwrap();
     }
 
