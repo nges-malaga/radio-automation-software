@@ -142,6 +142,9 @@ interface MusicBrowserProps {
   showToast: (msg: string) => void;
 }
 
+/** Campos que puede rellenar Deezer */
+type DzField = "title" | "artist" | "album" | "year" | "genre" | "isrc";
+
 interface EditState {
   id: string;
   title: string;
@@ -151,6 +154,10 @@ interface EditState {
   genre: string;
   year: string;
   isrc: string;
+  /** Lo que había antes de «Rellenar desde Deezer» (para deshacer campo a campo) */
+  dz?: Partial<Record<DzField, string>>;
+  /** Carátula anterior a la de Deezer */
+  dzCover?: { prev: EditState["coverChange"] };
   tagsText: string;
   language: string;
   disabled: boolean;
@@ -888,6 +895,27 @@ function MusicBrowserBase({
 
   const openEditor = (t: Track, navIds?: string[]) => {
     setEdit(makeEdit(t, navIds ?? navFor(t.id)));
+  };
+
+  /** Lo que había antes de Deezer en un campo, con «Deshacer» (si sigue cambiado). */
+  const wasDz = (f: DzField) => {
+    const prev = edit?.dz?.[f];
+    if (!edit || prev === undefined || prev === edit[f]) return null;
+    return (
+      <span className="field-was" title={prev ? `Antes: ${prev}` : "Antes estaba vacío"}>
+        <span className="field-was-v">Antes: {prev ? <em>{prev}</em> : <em>(vacío)</em>}</span>
+        <button
+          type="button"
+          className="link-btn"
+          onClick={(e) => {
+            e.preventDefault();
+            setEdit((s) => (s ? { ...s, [f]: prev } : s));
+          }}
+        >
+          Deshacer
+        </button>
+      </span>
+    );
   };
 
   /** Guarda; con `next`, en vez de cerrar pasa a esa canción. */
@@ -1983,22 +2011,30 @@ function MusicBrowserBase({
           initialQuery={`${edit.artist} ${edit.title}`.trim()}
           onClose={() => setDeezerOpen(false)}
           onPick={(d) => {
-            setEdit((s) =>
-              s
-                ? {
-                    ...s,
-                    title: d.title || s.title,
-                    artist: d.artist || s.artist,
-                    album: d.album || s.album,
-                    year: d.year || s.year,
-                    genre: d.genre || s.genre,
-                    coverChange:
-                      d.coverBig || d.cover
-                        ? { kind: "url", source: d.coverBig || d.cover }
-                        : s.coverChange,
-                  }
-                : s,
-            );
+            setEdit((s) => {
+              if (!s) return s;
+              const next: Record<DzField, string> = {
+                title: d.title || s.title,
+                artist: d.artist || s.artist,
+                album: d.album || s.album,
+                year: d.year || s.year,
+                genre: d.genre || s.genre,
+                isrc: d.isrc || s.isrc,
+              };
+              // Se guarda lo de antes de lo que cambia (si ya se usó Deezer, lo original de entonces)
+              const dz: Partial<Record<DzField, string>> = { ...s.dz };
+              for (const f of Object.keys(next) as DzField[]) {
+                if (next[f] !== s[f] && !(f in dz)) dz[f] = s[f];
+              }
+              const newCover = d.coverBig || d.cover;
+              return {
+                ...s,
+                ...next,
+                dz,
+                coverChange: newCover ? { kind: "url", source: newCover } : s.coverChange,
+                dzCover: newCover ? s.dzCover ?? { prev: s.coverChange } : s.dzCover,
+              };
+            });
             setDeezerOpen(false);
           }}
           showToast={showToast}
@@ -2032,6 +2068,30 @@ function MusicBrowserBase({
                 <IconSearch size={14} />
                 Rellenar desde Deezer
               </button>
+              {(edit.dz && Object.keys(edit.dz).some((f) => edit.dz![f as DzField] !== edit[f as DzField])) || edit.dzCover ? (
+                <div className="dz-summary">
+                  <span>Datos de Deezer aplicados: lo cambiado se marca en cada campo.</span>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() =>
+                      setEdit((s) =>
+                        s
+                          ? {
+                              ...s,
+                              ...(s.dz as Partial<Record<DzField, string>>),
+                              coverChange: s.dzCover ? s.dzCover.prev : s.coverChange,
+                              dz: undefined,
+                              dzCover: undefined,
+                            }
+                          : s,
+                      )
+                    }
+                  >
+                    Deshacer todo
+                  </button>
+                </div>
+              ) : null}
               <div className="edit-cover">
                 <div className="edit-cover-img">
                   {(() => {
@@ -2071,12 +2131,27 @@ function MusicBrowserBase({
                     </button>
                   )}
                   <span className="hint">Se aplica a todo el álbum.</span>
+                  {edit.dzCover && edit.coverChange?.kind === "url" && (
+                    <span className="field-was">
+                      Carátula de Deezer
+                      <button
+                        type="button"
+                        className="link-btn"
+                        onClick={() => setEdit((s) => (s && s.dzCover ? { ...s, coverChange: s.dzCover.prev, dzCover: undefined } : s))}
+                      >
+                        Deshacer
+                      </button>
+                    </span>
+                  )}
                 </div>
               </div>
-              <label className="field">
-                <span className="field-label">Título</span>
-                <input value={edit.title} onChange={(e) => setEdit({ ...edit, title: e.target.value })} />
-              </label>
+              <div className="field-row">
+                <label className="field">
+                  <span className="field-label">Título</span>
+                  <input value={edit.title} onChange={(e) => setEdit({ ...edit, title: e.target.value })} />
+                  {wasDz("title")}
+                </label>
+              </div>
               <div className="field-row">
                 <label className="field">
                   <span className="field-label">Artista</span>
@@ -2085,6 +2160,7 @@ function MusicBrowserBase({
                     placeholder="Todos, separados por comas"
                     onChange={(e) => setEdit({ ...edit, artist: e.target.value })}
                   />
+                  {wasDz("artist")}
                 </label>
                 <button
                   type="button"
@@ -2108,14 +2184,17 @@ function MusicBrowserBase({
                 <label className="field">
                   <span className="field-label">Álbum</span>
                   <input value={edit.album} onChange={(e) => setEdit({ ...edit, album: e.target.value })} />
+                  {wasDz("album")}
                 </label>
                 <label className="field">
                   <span className="field-label">Estilo</span>
                   <input value={edit.genre} onChange={(e) => setEdit({ ...edit, genre: e.target.value })} />
+                  {wasDz("genre")}
                 </label>
                 <label className="field field-year">
                   <span className="field-label">Año</span>
                   <input value={edit.year} onChange={(e) => setEdit({ ...edit, year: e.target.value })} />
+                  {wasDz("year")}
                 </label>
                 <label className="field field-isrc">
                   <span className="field-label">ISRC</span>
@@ -2128,6 +2207,7 @@ function MusicBrowserBase({
                     title="Código ISRC: 2 letras (país), 3 letras o cifras (registrante) y 7 cifras. Los guiones se quitan al guardar."
                     onChange={(e) => setEdit({ ...edit, isrc: e.target.value.toUpperCase() })}
                   />
+                  {wasDz("isrc")}
                 </label>
               </div>
               <div className="field-row">

@@ -24,6 +24,8 @@ pub struct DeezerTrack {
     pub cover_big: String,
     pub year: String,
     pub genre: String,
+    /// ISRC (solo en el detalle de la canción; normalizado, o vacío)
+    pub isrc: String,
 }
 
 fn get_json(url: &str, query: &[(&str, &str)]) -> Result<Value, String> {
@@ -71,6 +73,7 @@ fn parse_track(v: &Value) -> DeezerTrack {
         },
         year: date.get(..4).unwrap_or_default().to_string(),
         genre: String::new(),
+        isrc: crate::library::clean_isrc(&s(v, &["isrc"])).unwrap_or_default(),
     }
 }
 

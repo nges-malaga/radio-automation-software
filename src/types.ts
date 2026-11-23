@@ -1165,6 +1165,8 @@ export interface DeezerTrack {
   coverBig?: string;
   year: string;
   genre: string;
+  /** ISRC (viene en el detalle de la canción) */
+  isrc?: string;
 }
 
 /** Nivel de un canal del vumetro: 0..1 y dBFS. */

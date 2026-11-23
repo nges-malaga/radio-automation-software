@@ -5259,3 +5259,11 @@ label .help-inline { margin-left: 6px; }
 .field-row .field-isrc { flex: 0 0 140px; }
 .field-isrc input { font-family: var(--mono); letter-spacing: .5px; }
 .input-bad, .input-bad:focus { border-color: #e5484d !important; }
+
+/* Editar metadatos: lo que cambió Deezer */
+.field-was { display: flex; align-items: baseline; gap: 6px; margin-top: 3px; font-size: 11px; color: #c08bff; min-width: 0; }
+.field-was-v { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; color: var(--text-faint); }
+.field-was-v em { font-style: normal; color: var(--text-dim); }
+.field-was .link-btn { font: inherit; font-size: 11px; color: #c08bff; background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; flex: 0 0 auto; }
+.dz-summary { display: flex; align-items: center; gap: 10px; font-size: 12px; color: #c08bff; background: #c08bff14; border: 1px solid #c08bff40; border-radius: 6px; padding: 6px 10px; margin-bottom: 8px; }
+.dz-summary span { flex: 1; }
