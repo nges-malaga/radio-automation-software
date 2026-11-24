@@ -299,6 +299,26 @@ export function renameBlock(id: string, name: string): Promise<void> {
 export function blockSetCover(id: string, file: string | null): Promise<string> {
   return invoke<string>("block_set_cover", { id, file });
 }
+/** Una canción con favoritos (la nube junta oyentes de NGRADIO y operarios de OmniCaster Music). */
+export interface FavoriteItem {
+  /** Id de la canción en la biblioteca, si la nube la ha reconocido */
+  trackId?: string | null;
+  title: string;
+  artist: string;
+  album?: string;
+  cover?: string;
+  /** Oyentes (app de NGRADIO) que la tienen en favoritos */
+  listeners: number;
+  /** Operarios (OmniCaster Music) que la tienen marcada */
+  operators: number;
+  /** Último marcado (epoch ms) */
+  lastAt?: number;
+}
+export async function cloudFavorites(): Promise<FavoriteItem[]> {
+  const r = await invoke<{ items?: FavoriteItem[] }>("cloud_favorites");
+  return Array.isArray(r?.items) ? r.items : [];
+}
+
 /** Portada generada por IA en la nube para una lista. */
 export function blockCoverAi(id: string): Promise<string> {
   return invoke<string>("block_cover_ai", { id });

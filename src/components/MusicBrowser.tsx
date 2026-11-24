@@ -23,7 +23,8 @@ import { ScheduleEditor, newScheduleBlock } from "./ScheduleEditor";
 import { beginDrag, registerDropZone } from "../dnd";
 import { GalleryHeader, MusicGallery, coverSrc, matchesSel } from "./MusicGallery";
 import { ExplorerView } from "./ExplorerView";
-import { pickScanFolder, scanFolder, aiWindowPayloadSet, blockSetCover, blockCoverAi, pickImageFile } from "../api";
+import { pickScanFolder, scanFolder, aiWindowPayloadSet, blockSetCover, blockCoverAi, pickImageFile, cloudFavorites } from "../api";
+import type { FavoriteItem } from "../api";
 import { openAiWindow } from "../bridge";
 import { listen } from "@tauri-apps/api/event";
 import { IS_WEB } from "../platform";
@@ -95,7 +96,7 @@ import { FilterBar } from "./FilterBar";
 import { EMPTY_FILTER, filterCount, matchFilter } from "../trackFilters";
 import type { TrackFilter } from "../trackFilters";
 
-type Mode = "blocks" | "music" | "explorer" | "tags" | "history";
+type Mode = "blocks" | "music" | "explorer" | "tags" | "history" | "favorites";
 type SortKey = "title" | "album" | "genre" | "added" | "duration";
 
 /** Fecha de alta en la biblioteca, corta (dd/mm/aa). */
@@ -238,7 +239,18 @@ const MODES: { id: Mode; label: string }[] = [
   { id: "explorer", label: "Explorador" },
   { id: "tags", label: "Etiquetas" },
   { id: "history", label: "Historial" },
-].filter((m) => !IS_WEB || (m.id !== "explorer" && m.id !== "history")) as { id: Mode; label: string }[];
+  { id: "favorites", label: "Favoritos" },
+].filter((m) => !IS_WEB || (m.id !== "explorer" && m.id !== "history" && m.id !== "favorites")) as { id: Mode; label: string }[];
+
+/** Clave para reconocer una canción por artista y título (favoritos que no traen id). */
+const favKey = (artist: string, title: string) =>
+  `${artist}|${title}`
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s*[([][^)\]]*[)\]]/g, "")
+    .replace(/[^a-z0-9|]+/g, " ")
+    .trim();
 
 /** Cuantas canciones ya emitidas se ven a la vez. */
 const HISTORY_LIMIT = 25;
@@ -695,6 +707,60 @@ function MusicBrowserBase({
     return out;
   }, [history, tracks]);
 
+  // Favoritos de la gente (oyentes de NGRADIO + operarios de OmniCaster Music), de la nube.
+  const [favs, setFavs] = useState<FavoriteItem[] | null>(null);
+  const [favErr, setFavErr] = useState("");
+  const [favWho, setFavWho] = useState<"all" | "listeners" | "operators">("all");
+  const [favTick, setFavTick] = useState(0);
+  useEffect(() => {
+    if (mode !== "favorites") return;
+    let alive = true;
+    const load = () =>
+      cloudFavorites()
+        .then((items) => {
+          if (!alive) return;
+          setFavs(items);
+          setFavErr("");
+        })
+        .catch((e) => alive && setFavErr(String(e)));
+    void load();
+    const timer = window.setInterval(load, 5 * 60_000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [mode, favTick]);
+  const favRows = useMemo(() => {
+    if (!favs) return [];
+    const byId = new Map(tracks.map((t) => [t.id, t]));
+    const byKey = new Map(tracks.map((t) => [favKey(t.artist, t.title), t]));
+    const q = query.trim().toLowerCase();
+    // Una canción puede llegar por las dos vías: se juntan.
+    const merged = new Map<string, { item: FavoriteItem; track?: Track }>();
+    for (const item of favs) {
+      const track = (item.trackId ? byId.get(item.trackId) : undefined) ?? byKey.get(favKey(item.artist, item.title));
+      const key = track ? `t:${track.id}` : `k:${favKey(item.artist, item.title)}`;
+      const prev = merged.get(key);
+      if (prev) {
+        prev.item = {
+          ...prev.item,
+          listeners: prev.item.listeners + (item.listeners || 0),
+          operators: prev.item.operators + (item.operators || 0),
+          lastAt: Math.max(prev.item.lastAt ?? 0, item.lastAt ?? 0),
+        };
+      } else merged.set(key, { item: { ...item, listeners: item.listeners || 0, operators: item.operators || 0 }, track });
+    }
+    return [...merged.values()]
+      .filter(({ item }) => (favWho === "listeners" ? item.listeners > 0 : favWho === "operators" ? item.operators > 0 : true))
+      .filter(({ item, track }) => !q || `${track?.title ?? item.title} ${track?.artist ?? item.artist}`.toLowerCase().includes(q))
+      .filter(({ track }) => !track || !filterCount(qfilter) || matchFilter(track, qfilter))
+      .sort((a, b) => {
+        const n = (x: FavoriteItem) => (favWho === "listeners" ? x.listeners : favWho === "operators" ? x.operators : x.listeners + x.operators);
+        return n(b.item) - n(a.item) || (b.item.lastAt ?? 0) - (a.item.lastAt ?? 0);
+      });
+  }, [favs, tracks, favWho, query, qfilter]);
+  const favTracks = useMemo(() => favRows.flatMap((r) => (r.track ? [r.track] : [])), [favRows]);
+
   const filtered = useMemo(() => {
     let list = mode === "music" ? musicTracks : tracks;
     if (selection) {
@@ -807,7 +873,7 @@ function MusicBrowserBase({
       if (edit || ctx || propsId) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a" && mode !== "explorer") {
         e.preventDefault();
-        const list = mode === "history" ? playedTracks.map((p) => p.track) : filtered;
+        const list = mode === "history" ? playedTracks.map((p) => p.track) : mode === "favorites" ? favTracks : filtered;
         setPicked(new Set(list.map((t) => t.id)));
       } else if (e.key === "Escape" && picked.size > 0) {
         setPicked(new Set());
@@ -835,7 +901,7 @@ function MusicBrowserBase({
     const h = 214;
     // Con varias seleccionadas (y pinchando en una de ellas), el menú vale para todas.
     const many = picked.has(track.id) && picked.size > 1;
-    const order = (mode === "history" ? playedTracks.map((p) => p.track) : filtered).map((t) => t.id);
+    const order = (mode === "history" ? playedTracks.map((p) => p.track) : mode === "favorites" ? favTracks : filtered).map((t) => t.id);
     const ids = many ? order.filter((id) => picked.has(id)) : [track.id];
     if (!many) {
       setPicked(new Set([track.id]));
@@ -1172,6 +1238,7 @@ function MusicBrowserBase({
       return selection === NONE ? "Sin etiquetas" : selection;
     }
     if (mode === "history") return "Últimas canciones emitidas";
+    if (mode === "favorites") return "Favoritos de la gente";
     return selection;
   })();
 
@@ -1742,7 +1809,7 @@ function MusicBrowserBase({
             </div>
           )}
 
-          <div className="browser-cols">
+          <div className={`browser-cols ${mode === "favorites" ? "fav-cols" : ""}`}>
             <span aria-hidden="true" />
             <button type="button" className="bcol bcol-name" onClick={() => toggleSort("title")}>
               Nombre
@@ -1760,14 +1827,72 @@ function MusicBrowserBase({
               type="button"
               className="bcol bcol-dur"
               onClick={() => toggleSort("duration")}
-              title={mode === "history" ? "Hora en que sonó" : "Duración"}
+              title={mode === "history" ? "Hora en que sonó" : mode === "favorites" ? "Oyentes (NGRADIO) y operarios (OmniCaster Music) que la tienen en favoritos" : "Duración"}
             >
-              {mode === "history" ? "Emitida" : "Dur."}
+              {mode === "history" ? "Emitida" : mode === "favorites" ? "Favoritos" : "Dur."}
               {sort.key === "duration" && <span className="sort-mark">{sort.dir === 1 ? "↑" : "↓"}</span>}
             </button>
           </div>
 
-          {mode === "history" ? (
+          {mode === "favorites" ? (
+            <div className="browser-rows fav-rows" role="list" onClick={() => {
+              setSelectedId("");
+              setPicked(new Set());
+            }}>
+              <div className="fav-bar" onClick={(e) => e.stopPropagation()}>
+                {(["all", "listeners", "operators"] as const).map((w) => (
+                  <button key={w} type="button" className={`fchip ${favWho === w ? "fchip-on" : ""}`} onClick={() => setFavWho(w)}>
+                    {w === "all" ? "Todos" : w === "listeners" ? "♥ Oyentes" : "★ Operarios"}
+                  </button>
+                ))}
+                <span className="spacer" />
+                <button type="button" className="ghost-btn" onClick={() => setFavTick((n) => n + 1)} title="Volver a pedirlos a la nube">
+                  Actualizar
+                </button>
+              </div>
+              {favErr && !favs ? (
+                <div className="empty-note">No se han podido cargar los favoritos: {favErr}</div>
+              ) : !favs ? (
+                <div className="empty-note">Cargando favoritos…</div>
+              ) : favRows.length === 0 ? (
+                <div className="empty-note">
+                  Todavía no hay favoritos. Aquí se verán las canciones que los oyentes marcan con ♥ en la app de NGRADIO y
+                  las que los operarios marcan con ★ en OmniCaster Music.
+                </div>
+              ) : (
+                favRows.map(({ item, track }) => {
+                  const counts = (
+                    <span
+                      className="bcell bcol-dur brow-favs"
+                      title={`${item.listeners} oyentes · ${item.operators} operarios${item.lastAt ? ` · último: ${new Date(item.lastAt).toLocaleString("es-ES")}` : ""}`}
+                    >
+                      {item.listeners > 0 && <span className="fav-l">♥ {item.listeners}</span>}
+                      {item.operators > 0 && <span className="fav-o">★ {item.operators}</span>}
+                    </span>
+                  );
+                  return track ? (
+                    rowFor(track, counts, favTracks)
+                  ) : (
+                    <div key={`x-${item.artist}-${item.title}`} className="brow brow-ext" role="listitem" title="No está en la biblioteca">
+                      <span className="brow-cover" aria-hidden="true">
+                        {item.cover && /^https?:/.test(item.cover) ? <img src={item.cover} alt="" loading="lazy" /> : <IconNote size={13} />}
+                      </span>
+                      <div className="bcell bcol-name">
+                        <span className="brow-title">
+                          {item.title}
+                          <span className="badge-missing">NO ESTÁ EN LA BIBLIOTECA</span>
+                        </span>
+                        <span className="brow-sub">{item.artist}</span>
+                      </div>
+                      <span className="bcell bcol-album">{item.album || "—"}</span>
+                      <span className="bcell bcol-added" />
+                      {counts}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          ) : mode === "history" ? (
             <div className="browser-rows" role="list" onClick={() => {
               setSelectedId("");
               setPicked(new Set());
