@@ -967,9 +967,25 @@ export default function App() {
     }
     return bestEvent;
   }, [settings.events, settings.eventsEnabled, settings.liveMode, manualAuto, blocks, nowTick]);
-  const autoScope = activeAutoEvent
-    ? { kind: activeAutoEvent.sourceKind, id: activeAutoEvent.sourceId }
-    : null;
+  // Rotación elegida a mano en la barra mientras manda un evento: vale hasta que cambie el evento.
+  const [rotationOverride, setRotationOverride] = useState<{ eventId: string; blockId: string } | null>(null);
+  const override =
+    rotationOverride && activeAutoEvent && rotationOverride.eventId === activeAutoEvent.id ? rotationOverride : null;
+  const autoScope = override
+    ? override.blockId
+      ? { kind: "block" as const, id: override.blockId }
+      : null
+    : activeAutoEvent
+      ? { kind: activeAutoEvent.sourceKind, id: activeAutoEvent.sourceId }
+      : null;
+  /** Lo que muestra el selector de rotación: la lista que usa ahora el AutoDJ */
+  const rotationValue = override
+    ? override.blockId
+    : activeAutoEvent
+      ? activeAutoEvent.sourceKind === "block"
+        ? activeAutoEvent.sourceId
+        : "__library"
+      : defaultBlockId;
   const autoScopeKey = autoScope ? `${autoScope.kind}|${autoScope.id}` : "";
   const autoScopeRef = useRef(autoScope);
   autoScopeRef.current = autoScope;
@@ -5250,21 +5266,22 @@ export default function App() {
         hasPlaylist={rows.length > 0}
         blocks={blocks}
         defaultBlockId={defaultBlockId}
-        autoEventLabel={activeAutoEvent ? eventSourceLabel(activeAutoEvent, blocks) : null}
+        rotationValue={rotationValue}
+        autoEventLabel={activeAutoEvent ? activeAutoEvent.name || eventSourceLabel(activeAutoEvent, blocks) : null}
         onTogglePlay={() => void togglePlay()}
         onNext={() => void next()}
         onPrev={() => void prev()}
         onAutopilot={setAutopilot}
         onDefaultBlockChange={(id) => {
-          updateSettings({ ...settings, defaultBlockId: id });
           const name = blocks.find((block) => block.id === id)?.name;
-          showToast(
-            activeAutoEvent
-              ? `Lista guardada; ahora manda el evento «${eventSourceLabel(activeAutoEvent, blocks)}»`
-              : name
-                ? `AutoDJ: «${name}»`
-                : "AutoDJ: automático (listas de Música)",
-          );
+          if (activeAutoEvent) {
+            // Con un evento activo, el cambio vale mientras dure ese evento.
+            setRotationOverride({ eventId: activeAutoEvent.id, blockId: id });
+            showToast(`AutoDJ: «${name ?? "automático"}» hasta que termine el evento`);
+            return;
+          }
+          updateSettings({ ...settings, defaultBlockId: id });
+          showToast(name ? `AutoDJ: «${name}»` : "AutoDJ: automático (listas de Música)");
         }}
         onFadeChange={(s) => updateSettings({ ...settings, fadeSeconds: s })}
         preview={

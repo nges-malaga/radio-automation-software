@@ -8,6 +8,8 @@ interface PlayerBarProps {
   hasPlaylist: boolean;
   blocks: Block[];
   defaultBlockId: string;
+  /** Lo que usa ahora el AutoDJ (la del evento, si manda uno); "__library" = toda la biblioteca */
+  rotationValue?: string;
   autoEventLabel: string | null;
   onTogglePlay: () => void;
   onNext: () => void;
@@ -43,6 +45,7 @@ export function PlayerBar({
   hasPlaylist,
   blocks,
   defaultBlockId,
+  rotationValue,
   autoEventLabel,
   onTogglePlay,
   onNext,
@@ -81,6 +84,7 @@ export function PlayerBar({
 
       <div className="pb-divider" />
 
+      <div className="pb-autodj">
       <label className={`pb-switch ${autopilot ? "switch-on" : ""}`} title="Rellena la lista solo, respetando las reglas de rotación">
         <IconBolt size={15} />
         <span className="pb-switch-label">AUTODJ</span>
@@ -93,33 +97,32 @@ export function PlayerBar({
         />
       </label>
 
-      <div className="pb-divider" />
-
-      <div className="pb-group-seg pb-block">
-        <span className="pb-label">ROTACIÓN</span>
+      <label className="pb-rotation">
+        <span className="pb-mini-label">Rotación</span>
         <select
           className="pb-select"
-          value={defaultBlockId}
+          value={rotationValue ?? defaultBlockId}
           onChange={(e) => onDefaultBlockChange(e.target.value)}
           aria-label="Lista que usa el AutoDJ"
           title={
             autoEventLabel
-              ? `Ahora manda el evento: ${autoEventLabel}`
+              ? `La ha puesto el evento «${autoEventLabel}». Si la cambias, vale hasta que termine el evento.`
               : "Lista de la que el AutoDJ saca las próximas canciones"
           }
         >
           <option value="">Automático</option>
+          {rotationValue === "__library" && (
+            <option value="__library" disabled>
+              Toda la biblioteca
+            </option>
+          )}
           {blocks.map((block) => (
             <option key={block.id} value={block.id}>
               {block.name}
             </option>
           ))}
         </select>
-        {autoEventLabel && (
-          <span className="pb-block-event" title="Evento activo: tiene prioridad sobre la lista">
-            Evento: {autoEventLabel}
-          </span>
-        )}
+      </label>
       </div>
 
       <div className="pb-divider" />
