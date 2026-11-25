@@ -299,7 +299,7 @@ export function renameBlock(id: string, name: string): Promise<void> {
 export function blockSetCover(id: string, file: string | null): Promise<string> {
   return invoke<string>("block_set_cover", { id, file });
 }
-/** Una canción con favoritos (la nube junta oyentes de NGRADIO y operarios de OmniCaster Music). */
+/** Una canción marcada como favorita (la nube da cuántos «me gusta» tiene en total). */
 export interface FavoriteItem {
   /** Id de la canción en la biblioteca, si la nube la ha reconocido */
   trackId?: string | null;
@@ -307,10 +307,8 @@ export interface FavoriteItem {
   artist: string;
   album?: string;
   cover?: string;
-  /** Oyentes (app de NGRADIO) que la tienen en favoritos */
-  listeners: number;
-  /** Operarios (OmniCaster Music) que la tienen marcada */
-  operators: number;
+  /** Cuántas personas la tienen en favoritos */
+  likes: number;
   /** Último marcado (epoch ms) */
   lastAt?: number;
 }

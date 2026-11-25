@@ -710,7 +710,6 @@ function MusicBrowserBase({
   // Favoritos de la gente (oyentes de NGRADIO + operarios de OmniCaster Music), de la nube.
   const [favs, setFavs] = useState<FavoriteItem[] | null>(null);
   const [favErr, setFavErr] = useState("");
-  const [favWho, setFavWho] = useState<"all" | "listeners" | "operators">("all");
   const [favTick, setFavTick] = useState(0);
   useEffect(() => {
     if (mode !== "favorites") return;
@@ -744,21 +743,16 @@ function MusicBrowserBase({
       if (prev) {
         prev.item = {
           ...prev.item,
-          listeners: prev.item.listeners + (item.listeners || 0),
-          operators: prev.item.operators + (item.operators || 0),
+          likes: prev.item.likes + (item.likes || 0),
           lastAt: Math.max(prev.item.lastAt ?? 0, item.lastAt ?? 0),
         };
-      } else merged.set(key, { item: { ...item, listeners: item.listeners || 0, operators: item.operators || 0 }, track });
+      } else merged.set(key, { item: { ...item, likes: item.likes || 0 }, track });
     }
     return [...merged.values()]
-      .filter(({ item }) => (favWho === "listeners" ? item.listeners > 0 : favWho === "operators" ? item.operators > 0 : true))
       .filter(({ item, track }) => !q || `${track?.title ?? item.title} ${track?.artist ?? item.artist}`.toLowerCase().includes(q))
       .filter(({ track }) => !track || !filterCount(qfilter) || matchFilter(track, qfilter))
-      .sort((a, b) => {
-        const n = (x: FavoriteItem) => (favWho === "listeners" ? x.listeners : favWho === "operators" ? x.operators : x.listeners + x.operators);
-        return n(b.item) - n(a.item) || (b.item.lastAt ?? 0) - (a.item.lastAt ?? 0);
-      });
-  }, [favs, tracks, favWho, query, qfilter]);
+      .sort((a, b) => b.item.likes - a.item.likes || (b.item.lastAt ?? 0) - (a.item.lastAt ?? 0));
+  }, [favs, tracks, query, qfilter]);
   const favTracks = useMemo(() => favRows.flatMap((r) => (r.track ? [r.track] : [])), [favRows]);
 
   const filtered = useMemo(() => {
@@ -1827,7 +1821,7 @@ function MusicBrowserBase({
               type="button"
               className="bcol bcol-dur"
               onClick={() => toggleSort("duration")}
-              title={mode === "history" ? "Hora en que sonó" : mode === "favorites" ? "Oyentes (NGRADIO) y operarios (OmniCaster Music) que la tienen en favoritos" : "Duración"}
+              title={mode === "history" ? "Hora en que sonó" : mode === "favorites" ? "Cuántas personas la tienen en favoritos" : "Duración"}
             >
               {mode === "history" ? "Emitida" : mode === "favorites" ? "Favoritos" : "Dur."}
               {sort.key === "duration" && <span className="sort-mark">{sort.dir === 1 ? "↑" : "↓"}</span>}
@@ -1840,11 +1834,6 @@ function MusicBrowserBase({
               setPicked(new Set());
             }}>
               <div className="fav-bar" onClick={(e) => e.stopPropagation()}>
-                {(["all", "listeners", "operators"] as const).map((w) => (
-                  <button key={w} type="button" className={`fchip ${favWho === w ? "fchip-on" : ""}`} onClick={() => setFavWho(w)}>
-                    {w === "all" ? "Todos" : w === "listeners" ? "♥ Oyentes" : "♥ Operarios"}
-                  </button>
-                ))}
                 <span className="spacer" />
                 <button type="button" className="ghost-btn" onClick={() => setFavTick((n) => n + 1)} title="Volver a pedirlos a la nube">
                   Actualizar
@@ -1856,18 +1845,17 @@ function MusicBrowserBase({
                 <div className="empty-note">Cargando favoritos…</div>
               ) : favRows.length === 0 ? (
                 <div className="empty-note">
-                  Todavía no hay favoritos. Aquí se verán las canciones que los oyentes marcan con ♥ en la app de NGRADIO y
-                  las que los operarios marcan con ♥ en OmniCaster Music.
+                  Todavía no hay favoritos. Aquí se verán las canciones marcadas con ♥, ordenadas por cuántos «me gusta»
+                  tienen.
                 </div>
               ) : (
                 favRows.map(({ item, track }) => {
                   const counts = (
                     <span
                       className="bcell bcol-dur brow-favs"
-                      title={`${item.listeners} oyentes · ${item.operators} operarios${item.lastAt ? ` · último: ${new Date(item.lastAt).toLocaleString("es-ES")}` : ""}`}
+                      title={`${item.likes === 1 ? "1 me gusta" : `${item.likes} me gusta`}${item.lastAt ? ` · último: ${new Date(item.lastAt).toLocaleString("es-ES")}` : ""}`}
                     >
-                      {item.listeners > 0 && <span className="fav-l" title="Oyentes (app de NGRADIO)">♥ {item.listeners}</span>}
-                      {item.operators > 0 && <span className="fav-o" title="Operarios (OmniCaster Music)">♥ {item.operators}</span>}
+                      <span className="fav-l">♥ {item.likes}</span>
                     </span>
                   );
                   return track ? (
