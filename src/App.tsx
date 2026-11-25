@@ -978,6 +978,8 @@ export default function App() {
     : activeAutoEvent
       ? { kind: activeAutoEvent.sourceKind, id: activeAutoEvent.sourceId }
       : null;
+  /** Elegir la rotación (barra o móvil): con un evento activo vale mientras dure; si no, se guarda. */
+  const chooseRotationRef = useRef<(id: string, from?: string) => void>(() => {});
   /** Lo que muestra el selector de rotación: la lista que usa ahora el AutoDJ */
   const rotationValue = override
     ? override.blockId
@@ -986,6 +988,18 @@ export default function App() {
         ? activeAutoEvent.sourceId
         : "__library"
       : defaultBlockId;
+  chooseRotationRef.current = (id: string, from = "") => {
+    const valid = !id || blocks.some((b) => b.id === id);
+    if (!valid) return;
+    const name = blocks.find((block) => block.id === id)?.name;
+    if (activeAutoEvent) {
+      setRotationOverride({ eventId: activeAutoEvent.id, blockId: id });
+      showToast(`AutoDJ: «${name ?? "automático"}» hasta que termine el evento${from}`);
+      return;
+    }
+    updateSettings({ ...settings, defaultBlockId: id });
+    showToast((name ? `AutoDJ: «${name}»` : "AutoDJ: automático (listas de Música)") + from);
+  };
   const autoScopeKey = autoScope ? `${autoScope.kind}|${autoScope.id}` : "";
   const autoScopeRef = useRef(autoScope);
   autoScopeRef.current = autoScope;
@@ -4142,7 +4156,9 @@ export default function App() {
     const nextIndex = nextPick ? (nextPick.listId === active?.id ? nextPick.index : -1) : playingRow >= 0 ? playingRow + 1 : -1;
     return {
       blocks: blocks.map((b) => ({ id: b.id, name: b.name, count: blockCounts.get(b.id) ?? 0 })),
-      autodj: settings.defaultBlockId ?? "",
+      // La rotación que usa ahora el AutoDJ (la del evento si manda uno)
+      autodj: rotationValue,
+      autodjEvent: activeAutoEvent ? activeAutoEvent.name || eventSourceLabel(activeAutoEvent, blocks) : "",
       lists: playlists.map((p) => ({ id: p.id, name: p.name, current: p.id === active?.id })),
       station: settings.radioName || "OmniCaster",
       listName: active?.name ?? "",
@@ -4254,7 +4270,7 @@ export default function App() {
     };
     // pos.cur no entra: el móvil avanza la barra solo (se reenvía cada 10 s).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mobileCfg?.enabled, deckRow, nextRow, rows, playingRow, paused, pos.total, nextPick, active, autoIds, autopilotOn, audioStreamRunning, videoStreamRunning, audioStreamReady, videoStreamReady, streamBusy, streamStatus, settings.video, vsNow, settings.mixerChannels, settings.radioName, settings.events, settings.campaigns, settings.programs, mobileUpd, settings.pastVisible, blocks, playlists, libraryHits, settings.streaming, settings.mixerBuses, settings.masterVolume, settings.defaultBlockId, settings.audioDevices, mDiag, blockCounts, aiRemote, settings.ai, settings.energyCurve, enrichSt]);
+  }, [mobileCfg?.enabled, deckRow, nextRow, rows, playingRow, paused, pos.total, nextPick, active, autoIds, autopilotOn, audioStreamRunning, videoStreamRunning, audioStreamReady, videoStreamReady, streamBusy, streamStatus, settings.video, vsNow, settings.mixerChannels, settings.radioName, settings.events, settings.campaigns, settings.programs, mobileUpd, settings.pastVisible, blocks, playlists, libraryHits, settings.streaming, settings.mixerBuses, settings.masterVolume, settings.defaultBlockId, rotationValue, activeAutoEvent, settings.audioDevices, mDiag, blockCounts, aiRemote, settings.ai, settings.energyCurve, enrichSt]);
   const mobileUpdRef = useRef(mobileUpd);
   mobileUpdRef.current = mobileUpd;
   const mobileSnapRef = useRef(mobileSnapshot);
@@ -4634,8 +4650,7 @@ export default function App() {
         break;
       }
       case "autodjList": {
-        const id = String(c.id ?? "");
-        updateSettings({ ...s, defaultBlockId: !id || blocks.some((b) => b.id === id) ? id : "" });
+        chooseRotationRef.current(String(c.id ?? ""), " (desde el móvil)");
         break;
       }
       case "listSwitch": {
@@ -4649,7 +4664,10 @@ export default function App() {
         const pick = nextPickRef.current;
         if (pick && pick.listId === activeIdRef.current) setNextPick(null);
         void mutateList(keepId ? () => [keepId] : () => []);
-        showToast("Lista vaciada desde el móvil" + (keepId ? " (sigue sonando la canción en antena)" : ""));
+        showToast(
+          (autopilotOnRef.current ? "Lista regenerada desde el móvil" : "Lista vaciada desde el móvil") +
+            (keepId ? " (sigue sonando la canción en antena)" : ""),
+        );
         break;
       }
       case "aiAsk": {
@@ -5272,17 +5290,7 @@ export default function App() {
         onNext={() => void next()}
         onPrev={() => void prev()}
         onAutopilot={setAutopilot}
-        onDefaultBlockChange={(id) => {
-          const name = blocks.find((block) => block.id === id)?.name;
-          if (activeAutoEvent) {
-            // Con un evento activo, el cambio vale mientras dure ese evento.
-            setRotationOverride({ eventId: activeAutoEvent.id, blockId: id });
-            showToast(`AutoDJ: «${name ?? "automático"}» hasta que termine el evento`);
-            return;
-          }
-          updateSettings({ ...settings, defaultBlockId: id });
-          showToast(name ? `AutoDJ: «${name}»` : "AutoDJ: automático (listas de Música)");
-        }}
+        onDefaultBlockChange={(id) => chooseRotationRef.current(id)}
         onFadeChange={(s) => updateSettings({ ...settings, fadeSeconds: s })}
         preview={
           preview

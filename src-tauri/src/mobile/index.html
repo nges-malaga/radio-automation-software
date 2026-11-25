@@ -92,6 +92,19 @@
   .on .dot { background: var(--live); box-shadow: 0 0 8px var(--live); }
   .green.on .dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  /* AutoDJ + rotación (como la barra del PC) */
+  .adj { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: end; margin-bottom: 10px; }
+  .adj .btn { margin: 0; width: auto; padding: 12px 14px; }
+  .rot { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .rot .lab { font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); display: flex; align-items: center; gap: 6px; }
+  .rot select { width: 100%; min-width: 0; padding: 12px 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel2); color: var(--text); font-size: 15px; }
+  .rot .ev { font-size: 11.5px; color: var(--dim); }
+  /* (i): explicación plegada */
+  .ih { flex: 0 0 auto; width: 17px; height: 17px; border-radius: 50%; border: 1px solid var(--faint); background: none; color: var(--dim);
+    font: italic 700 11px Georgia, serif; line-height: 15px; padding: 0; display: inline-grid; place-items: center; }
+  .ih.on { border-color: var(--accent); color: var(--accent); }
+  .helptxt { background: #161b23; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 13px; color: var(--dim);
+    line-height: 1.45; margin: 0 0 10px; text-transform: none; letter-spacing: 0; font-weight: 400; }
   .grid2 .btn { margin: 0; }
   .src.on { background: var(--live); border-color: var(--live); color: #fff; }
   .ch { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line); }
@@ -327,12 +340,8 @@ function viewLive() {
       </div>
     </div>
     <div class="card next">Siguiente: ${S.next ? `<b>${esc(S.next.title)}</b> — ${esc(S.next.artist)}` : "<b>nada</b>"}</div>
-    <button class="btn green ${S.autopilot ? "on" : ""}" data-c="autopilot"><span class="dot"></span>AutoDJ ${S.autopilot ? "activado" : "apagado"}</button>
-    ${collections().length ? `<div class="snapnote" style="margin:4px 2px 0">El AutoDJ elige canciones de:</div>
-    <div class="lchips" style="flex-wrap:wrap">${collections().map((b) => `<button class="lchip ${S.autodj === b.id ? "on" : ""}" data-dj="${esc(b.id)}">${esc(b.name)}</button>`).join("")}<button class="lchip ${!S.autodj ? "on" : ""}" data-dj="">Toda la biblioteca</button></div>` : ""}`;
+    ${autodjCtl()}`;
   $("#main").onclick = (e) => {
-    const dj = e.target.closest("[data-dj]");
-    if (dj) { cmd({ cmd: "autodjList", id: dj.dataset.dj }); return; }
     const b = e.target.closest("[data-c]");
     if (!b) return;
     const c = b.dataset.c;
@@ -373,7 +382,7 @@ function viewBlocks() {
   const bl = collections();
   $("#main").innerHTML = `${listSeg()}
     <button class="btn" data-bnew="1">+ Nueva lista</button>
-    ${bl.length ? bl.map((b) => `<div class="row" data-bopen="${esc(b.id)}"><div class="t"><div>${esc(b.name)}${S.autodj === b.id ? '<span class="badge b-auto">PILOTO</span>' : ""}</div><small>${b.count ?? 0} ${b.count === 1 ? "pista" : "pistas"}</small></div><span class="d">›</span></div>`).join("") : '<div class="empty">Todavía no hay listas</div>'}`;
+    ${bl.length ? bl.map((b) => `<div class="row" data-bopen="${esc(b.id)}"><div class="t"><div>${esc(b.name)}${S.autodj === b.id ? '<span class="badge b-auto">ROTACIÓN</span>' : ""}</div><small>${b.count ?? 0} ${b.count === 1 ? "pista" : "pistas"}</small></div><span class="d">›</span></div>`).join("") : '<div class="empty">Todavía no hay listas</div>'}`;
   $("#main").onclick = (e) => {
     if (onListSeg(e)) return;
     if (e.target.closest("[data-bnew]")) {
@@ -435,8 +444,9 @@ function viewList() {
   const rows = all.slice(firstShown);
   const hidden = firstShown;
   $("#main").innerHTML = `${listSeg()}<div class="lchips">${lists.map((l) => `<button class="lchip ${l.current ? "on" : ""}" data-list="${esc(l.id)}">${esc(l.name)}</button>`).join("")}</div>
-    <h3>${esc(S.listName || "Lista")} · ${all.length} pistas</h3>
-    <div class="grid2"><button class="btn" data-addtrk="1">+ Añadir</button><button class="btn" data-clear="1" style="border-color:#ff8b8e;color:#ff8b8e">Vaciar</button></div>
+    ${autodjCtl()}
+    <h3 style="display:flex;align-items:center;gap:8px">${esc(S.listName || "Lista")} · ${all.length} pistas ${ih(S.autopilot ? "regen" : "clear")}</h3>
+    <div class="grid2"><button class="btn" data-addtrk="1">+ Añadir</button><button class="btn" data-clear="1" style="border-color:#ff8b8e;color:#ff8b8e">${S.autopilot ? "↻ Regenerar" : "Vaciar"}</button></div>
     <button class="btn" data-aiopen="1" style="border-color:var(--accent);color:var(--accent)">✨ Asistente IA: ¿qué pongo?</button>
     ${hidden ? `<button class="btn" data-past="1" style="padding:9px;font-size:13px;font-weight:500;color:var(--dim)">${hidden} canciones emitidas ocultas · ver</button>`
       : showPast && S.playing > keep ? '<button class="btn" data-past="1" style="padding:9px;font-size:13px;font-weight:500;color:var(--dim)">Ocultar las emitidas</button>' : ""}
@@ -452,9 +462,14 @@ function viewList() {
     const listBtn = e.target.closest("[data-list]");
     if (listBtn) { cmd({ cmd: "listSwitch", id: listBtn.dataset.list }); return; }
     if (e.target.closest("[data-clear]")) {
-      if (confirm("¿Vaciar esta lista? Lo que está sonando sigue hasta el final.")) cmd({ cmd: "playlistClear" });
+      const q = S.autopilot
+        ? "¿Regenerar la playlist? Se quita lo que queda por sonar y el AutoDJ la vuelve a llenar con la rotación actual. Lo que está sonando sigue hasta el final."
+        : "¿Vaciar esta lista? Lo que está sonando sigue hasta el final.";
+      if (confirm(q)) cmd({ cmd: "playlistClear" });
       return;
     }
+    const ab = e.target.closest("[data-c=autopilot]");
+    if (ab) { cmd({ cmd: "autopilot", on: !S.autopilot }); return; }
     if (e.target.closest("[data-addtrk]")) return openSearch();
     if (e.target.closest("[data-aiopen]")) {
       if (S.aiCfg && !S.aiCfg.enabled) {
@@ -478,6 +493,55 @@ function viewList() {
 function collections() {
   return (S.blocks || []).filter((b) => b.id && b.name);
 }
+
+/** (i) con su explicación: se despliega debajo al tocarlo. */
+const HELP = {
+  autodj: "AutoDJ: rellena la playlist en antena él solo con canciones de la rotación elegida, respetando las reglas de separación (artista, título) y la curva de energía.",
+  rot: "Rotación: lista de la que el AutoDJ saca las canciones. Si hay un evento activo, aquí se ve la suya; si la cambias, vale hasta que termine ese evento. «Automático»: las listas de Música marcadas para el AutoDJ.",
+  regen: "Regenerar: quita lo que queda por sonar y el AutoDJ vuelve a llenar la playlist con la rotación actual. La canción en antena sigue hasta el final.",
+  clear: "Vaciar: quita todas las pistas de la playlist. La canción en antena sigue hasta el final.",
+};
+function ih(key) {
+  return `<button class="ih" data-help="${key}" aria-label="Más información">i</button>`;
+}
+/** Bloque AutoDJ + rotación (Directo y Lista). */
+function autodjCtl() {
+  const bl = collections();
+  return `<div class="adj">
+    <div class="rot"><span class="lab">AutoDJ ${ih("autodj")}</span>
+      <button class="btn green ${S.autopilot ? "on" : ""}" data-c="autopilot"><span class="dot"></span>${S.autopilot ? "ON" : "OFF"}</button></div>
+    <label class="rot"><span class="lab">Rotación ${ih("rot")}</span>
+      <select data-rot="1" aria-label="Rotación del AutoDJ">
+        <option value="" ${!S.autodj ? "selected" : ""}>Automático</option>
+        ${S.autodj === "__library" ? '<option value="__library" selected disabled>Toda la biblioteca</option>' : ""}
+        ${bl.map((b) => `<option value="${esc(b.id)}" ${S.autodj === b.id ? "selected" : ""}>${esc(b.name)}</option>`).join("")}
+      </select>
+    </label>
+  </div>`;
+}
+// (i): despliega/oculta su explicación justo debajo de su fila
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-help]");
+  if (!b) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const host = b.closest(".adj, .grid2, .card, h3") || b.parentElement;
+  const open = host.nextElementSibling?.classList.contains("helptxt") && host.nextElementSibling.dataset.k === b.dataset.help;
+  document.querySelectorAll(".helptxt").forEach((x) => x.remove());
+  document.querySelectorAll(".ih.on").forEach((x) => x.classList.remove("on"));
+  if (open) return;
+  const d = document.createElement("div");
+  d.className = "helptxt";
+  d.dataset.k = b.dataset.help;
+  d.textContent = HELP[b.dataset.help] || "";
+  host.after(d);
+  b.classList.add("on");
+}, true);
+// Cambio de rotación desde cualquier vista
+document.addEventListener("change", (e) => {
+  const sel = e.target.closest("[data-rot]");
+  if (sel) cmd({ cmd: "autodjList", id: sel.value === "__library" ? "" : sel.value });
+});
 
 /* Asistente de canciones (IA): el estudio publica S.ai {busy, listen, msgs} */
 function openAi() {
