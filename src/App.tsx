@@ -327,6 +327,20 @@ function mobileAgendaPatch(kind: string, p: Record<string, unknown>, blocks: Blo
     }
     if (typeof p.streamUrl === "string") out.streamUrl = p.streamUrl.trim().slice(0, 500);
     if (p.trackMode === "random" || p.trackMode === "fixed" || p.trackMode === "latest") out.trackMode = p.trackMode;
+    if (typeof p.clearList === "boolean") out.clearList = p.clearList;
+    if (p.fadeSecs !== undefined) out.fadeSecs = Math.max(0, Math.min(30, Math.round(Number(p.fadeSecs) || 0)));
+    if (typeof p.trackId === "string") out.trackId = p.trackId.trim().slice(0, 80);
+    const int = (v: unknown, max: number) => Math.max(0, Math.min(max, Math.round(Number(v) || 0)));
+    if (p.noRepeatSlotDays !== undefined) out.noRepeatSlotDays = int(p.noRepeatSlotDays, 365);
+    if (p.noRepeatEventDays !== undefined) out.noRepeatEventDays = int(p.noRepeatEventDays, 365);
+    if (p.noRepeatAirMins !== undefined) out.noRepeatAirMins = int(p.noRepeatAirMins, 10080);
+    if (p.meta === null) out.meta = undefined;
+    else if (p.meta && typeof p.meta === "object") {
+      const m = p.meta as Record<string, unknown>;
+      const t = (k: string) => (typeof m[k] === "string" ? (m[k] as string).slice(0, 200) : "");
+      // La portada no se cambia desde el móvil: se conserva la que hubiera (ver cfgSave).
+      out.meta = { title: t("title"), artist: t("artist"), album: t("album"), year: "", genre: "", comment: t("comment"), cover: "" };
+    }
   }
   if (kind === "campaign") {
     const dt = (v: unknown) => (typeof v === "string" && (v === "" || /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v)) ? v : undefined);
@@ -4252,6 +4266,14 @@ export default function App() {
           sourceId: e.sourceId,
           trackMode: e.trackMode,
           streamUrl: e.streamUrl ?? "",
+          clearList: !!e.clearList,
+          fadeSecs: e.fadeSecs ?? 3,
+          trackId: e.trackId ?? "",
+          trackTitle: e.trackId ? (() => { const t = tracks.find((x) => x.id === e.trackId); return t ? `${t.title}${t.artist ? " — " + t.artist : ""}` : "Pista no encontrada"; })() : "",
+          noRepeatSlotDays: e.noRepeatSlotDays ?? 0,
+          noRepeatEventDays: e.noRepeatEventDays ?? 0,
+          noRepeatAirMins: e.noRepeatAirMins ?? 0,
+          meta: e.meta ? { title: e.meta.title, artist: e.meta.artist, album: e.meta.album, comment: e.meta.comment } : null,
         })),
         campaigns: (settings.campaigns ?? []).map((c) => ({
           id: c.id,
@@ -4466,7 +4488,18 @@ export default function App() {
         } else {
           const patch = mobileAgendaPatch(kind, (c.patch ?? {}) as Record<string, unknown>, blocks);
           if (!patch) return;
-          next = list.map((x) => (x.id === id ? { ...x, ...patch } : x));
+          next = list.map((x) => {
+            if (x.id !== id) return x;
+            const prevMeta = (x as { meta?: StreamMeta }).meta;
+            const meta = patch.meta as StreamMeta | undefined;
+            return {
+              ...x,
+              ...patch,
+              ...("meta" in patch
+                ? { meta: meta ? { ...meta, year: prevMeta?.year ?? "", genre: prevMeta?.genre ?? "", cover: prevMeta?.cover ?? "" } : undefined }
+                : {}),
+            };
+          });
         }
         updateSettings({ ...s, [key]: next });
         showToast(`Agenda cambiada desde el móvil: ${item.name || "sin nombre"}`);
@@ -4496,7 +4529,7 @@ export default function App() {
         const ev: StationEvent = {
           id: `e${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
           name: String(patch.name ?? "Evento").slice(0, 120) || "Evento",
-          enabled: true,
+          enabled: patch.enabled === undefined ? true : !!patch.enabled,
           kind: (patch.kind as StationEvent["kind"]) ?? "insert",
           days: (patch.days as number[]) ?? [1, 2, 3, 4, 5, 6, 7],
           times: (patch.times as string[]) ?? [],
@@ -4505,12 +4538,18 @@ export default function App() {
           schedules,
           sourceKind: (patch.sourceKind as StationEvent["sourceKind"]) ?? "library",
           sourceId: String(patch.sourceId ?? "a"),
-          trackId: "",
           trackMode: (patch.trackMode as StationEvent["trackMode"]) ?? "random",
           onTimeout: (patch.onTimeout as StationEvent["onTimeout"]) ?? "cancel",
           maxWaitSecs: (patch.maxWaitSecs as number) ?? 60,
           lastFired: "",
           streamUrl: patch.streamUrl as string | undefined,
+          trackId: (patch.trackId as string) ?? "",
+          clearList: patch.clearList as boolean | undefined,
+          fadeSecs: patch.fadeSecs as number | undefined,
+          noRepeatSlotDays: patch.noRepeatSlotDays as number | undefined,
+          noRepeatEventDays: patch.noRepeatEventDays as number | undefined,
+          noRepeatAirMins: patch.noRepeatAirMins as number | undefined,
+          meta: patch.meta as StreamMeta | undefined,
         };
         updateSettings({ ...s, events: [...(s.events ?? []), ev] });
         showToast(`Evento «${ev.name}» creado desde el móvil`);

@@ -145,6 +145,14 @@
   .ed { position: fixed; inset: 0; background: var(--bg); z-index: 15; overflow-y: auto; padding: calc(12px + env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom)); }
   .ed h4 { margin: 4px 0 14px; font-size: 17px; }
   .ed label { display: block; color: var(--dim); font-size: 12.5px; margin: 12px 0 5px; }
+  .ed h5 { margin: 20px 0 6px; font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); display: flex; align-items: center; gap: 8px; }
+  .ed label.chk { display: flex; align-items: center; gap: 10px; color: var(--text); font-size: 14px; margin: 14px 0 4px; }
+  .ed label.chk input { width: 20px; height: 20px; accent-color: var(--accent); }
+  .ed .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .ed .row3 label { margin: 0; font-size: 11.5px; }
+  .ed .row3 input { margin-top: 4px; }
+  .ed .pick { display: flex; align-items: center; gap: 10px; justify-content: space-between; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .ed .pick span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ed input[type=text], .ed input[type=time], .ed input[type=number], .ed input[type=datetime-local], .ed select {
     width: 100%; padding: 11px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 16px; }
   .days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
@@ -500,6 +508,14 @@ const HELP = {
   rot: "Rotación: lista de la que el AutoDJ saca las canciones. Si hay un evento activo, aquí se ve la suya; si la cambias, vale hasta que termine ese evento. «Automático»: las listas de Música marcadas para el AutoDJ.",
   regen: "Regenerar: quita lo que queda por sonar y el AutoDJ vuelve a llenar la playlist con la rotación actual. La canción en antena sigue hasta el final.",
   clear: "Vaciar: quita todas las pistas de la playlist. La canción en antena sigue hasta el final.",
+  evType: "Franja AutoDJ: desde cada hora indicada, el AutoDJ saca las canciones de la fuente elegida hasta que empiece otro evento. Evento de audio: a cada hora suena un audio concreto (pista, una al azar, la más reciente de una lista o un audio de internet).",
+  evSrc: "Pista de la biblioteca: siempre la misma. Pista aleatoria: una al azar de una lista, con reglas para no repetir. La más reciente de una lista: la última que entró (p. ej. la grabación del último directo). Audio de internet: un stream (Icecast, HLS…) entre una hora de inicio y otra de fin.",
+  evSched: "Cada franja tiene sus días y sus horas. Si OmniCaster está cerrado a esa hora no se emite; al abrirlo solo se recupera el horario más reciente si han pasado menos de 15 minutos.",
+  evClear: "Al entrar la franja se quita lo que queda por sonar (la canción en antena sigue) y el AutoDJ rellena desde cero con la fuente nueva.",
+  evWhen: "Como siguiente canción: entra al terminar el tema en antena, dure lo que dure. Forzar: si el tema dura más que la espera máxima, se corta con fundido. Cancelar: si no ha podido sonar dentro de la espera, se descarta.",
+  evRepeat: "Reglas para la pista aleatoria: no repetir la misma pista en esta misma hora durante N días, en este evento durante N días, ni si ha sonado en antena hace menos de N minutos. 0 = sin regla.",
+  evStream: "Dirección del audio: Icecast/Shoutcast, HLS (.m3u8), MP3/AAC por HTTP o la ruta de un archivo del estudio. Si la hora de fin es menor que la de inicio, termina al día siguiente.",
+  evMeta: "Lo que ven los oyentes (web, apps, RDS) mientras suena el audio de internet. Vacío: el nombre del evento.",
 };
 function ih(key) {
   return `<button class="ih" data-help="${key}" aria-label="Más información">i</button>`;
@@ -607,7 +623,7 @@ function openSearch(target = null) {
   const el = document.createElement("div");
   el.id = "srch";
   el.className = "ed";
-  el.innerHTML = `<h4>Añadir canción a «${esc(target ? target.name : S.listName || "la lista")}»</h4>
+  el.innerHTML = `<h4>${target && target.onPick ? "Elegir pista para el evento" : `Añadir canción a «${esc(target ? target.name : S.listName || "la lista")}»`}</h4>
     <input type="search" id="sq" placeholder="Título, artista o álbum…">
     <div id="shits" style="max-height:60vh;overflow-y:auto;margin-top:8px"></div>
     <div style="height:12px"></div><button class="btn" data-sclose="1">Cerrar</button>`;
@@ -615,6 +631,13 @@ function openSearch(target = null) {
   el.onclick = (e) => {
     if (e.target.closest("[data-sclose]")) { el.remove(); cmd({ cmd: "librarySearch", q: "" }); }
     const hit = e.target.closest("[data-add]");
+    if (hit && searchTarget && searchTarget.onPick) {
+      const h = (S.hits || []).find((x) => x.id === hit.dataset.add) || { id: hit.dataset.add, title: "", artist: "" };
+      el.remove();
+      cmd({ cmd: "librarySearch", q: "" });
+      searchTarget.onPick(h);
+      return;
+    }
     if (hit && searchTarget) {
       // En una lista de la biblioteca se pueden añadir varias seguidas.
       cmd({ cmd: "blockAddTrack", blockId: searchTarget.blockId, trackId: hit.dataset.add });
@@ -642,7 +665,7 @@ function renderHits() {
   if (!box) return;
   const hits = S.hits || [];
   box.innerHTML = hits.length
-    ? hits.map((h) => `<div class="srhit"><div class="t"><div>${esc(h.title)}</div><small>${esc(h.artist)}</small></div>${addedNow.has(h.id) ? '<button class="btn" disabled>Añadida</button>' : `<button class="btn" data-add="${esc(h.id)}">Añadir</button>`}</div>`).join("")
+    ? hits.map((h) => `<div class="srhit"><div class="t"><div>${esc(h.title)}</div><small>${esc(h.artist)}</small></div>${addedNow.has(h.id) ? '<button class="btn" disabled>Añadida</button>' : `<button class="btn" data-add="${esc(h.id)}">${searchTarget && searchTarget.onPick ? "Elegir" : "Añadir"}</button>`}</div>`).join("")
     : '<div class="snapnote" style="text-align:center">Sin resultados todavía (escribí algo y espera un segundo)</div>';
 }
 
@@ -924,7 +947,7 @@ function viewAgenda() {
       if (x) { x.enabled = !x.enabled; viewAgenda(); cmd({ cmd: "cfgToggle", kind, id: x.id, on: x.enabled }); }
       return;
     }
-    if (e.target.closest("[data-new]")) return openEditor("program", null);
+    if (e.target.closest("[data-new]")) return openEditor(kind, null);
     const it = e.target.closest(".item");
     if (it) openEditor(kind, it.dataset.id);
   };
@@ -936,7 +959,7 @@ function openEditor(kind, id) {
   const x = id
     ? (src || []).find((i) => i.id === id)
     : kind === "event"
-      ? { name: "", enabled: true, kind: "auto", sourceKind: "library", sourceId: "a", trackMode: "random", onTimeout: "cancel", maxWaitSecs: 60, schedules: [] }
+      ? { name: "", enabled: true, kind: "auto", sourceKind: "library", sourceId: "a", trackMode: "random", trackId: "", trackTitle: "", onTimeout: "next", maxWaitSecs: 60, clearList: false, fadeSecs: 3, noRepeatSlotDays: 0, noRepeatEventDays: 0, noRepeatAirMins: 0, streamUrl: "", meta: null, schedules: [] }
       : { name: "", subtitle: "", startsAt: "", enabled: true };
   if (!x) return;
   editing = { kind, id, d: JSON.parse(JSON.stringify(x)) };
@@ -946,6 +969,7 @@ function openEditor(kind, id) {
 }
 
 function renderEditor() {
+  if (editing.kind === "event") return renderEventEditor();
   const { kind, id, d } = editing;
   let el = document.getElementById("ed");
   if (!el) { el = document.createElement("div"); el.id = "ed"; el.className = "ed"; document.body.appendChild(el); }
@@ -1035,6 +1059,142 @@ function renderEditor() {
       closeEditor();
     }
   };
+}
+
+/** Editor completo de eventos (como el del PC). */
+function evSource(d) {
+  return d.kind === "stream" ? "url" : d.trackMode === "latest" ? "latest" : d.trackMode === "random" ? "random" : "track";
+}
+function renderEventEditor() {
+  const { id, d } = editing;
+  let el = document.getElementById("ed");
+  if (!el) { el = document.createElement("div"); el.id = "ed"; el.className = "ed"; document.body.appendChild(el); }
+  const src = evSource(d);
+  const isStream = d.kind === "stream";
+  const blocks = collections();
+  const listSel = (label, help) => `<label>${label} ${help ? ih(help) : ""}</label><select data-f="sourceKind">
+      <option value="block" ${d.sourceKind === "block" ? "selected" : ""} ${blocks.length ? "" : "disabled"}>Lista</option>
+      <option value="library" ${d.sourceKind !== "block" ? "selected" : ""}>Biblioteca completa</option></select>
+    ${d.sourceKind === "block" ? `<select data-f="sourceId" style="margin-top:8px">${blocks.map((b) => `<option value="${esc(b.id)}" ${d.sourceId === b.id ? "selected" : ""}>${esc(b.name)} (${b.count ?? 0})</option>`).join("")}</select>` : ""}`;
+  const franjas = (d.schedules || []).map((b, bi) => `
+    <div class="franja" data-b="${bi}">
+      <div class="days">${DAYS.map((l, di) => `<button data-day="${di + 1}" class="${(b.days || []).includes(di + 1) ? "on" : ""}">${l}</button>`).join("")}</div>
+      ${isStream ? `<div class="row2" style="margin-top:8px"><input type="time" data-f="start" value="${esc(b.start || "")}"><span>a</span><input type="time" data-f="end" value="${esc(b.end || "")}"></div>`
+        : `<div class="times">${(b.times || []).map((t, ti) => `<span class="chip">${esc(t)}<button data-rmt="${ti}" aria-label="Quitar">×</button></span>`).join("") || '<span class="snapnote">Sin horas: añade al menos una</span>'}</div>
+           <div class="addt"><input type="time" data-newt><button data-addt="1">Añadir hora</button></div>`}
+      ${(d.schedules || []).length > 1 ? '<button class="small" data-rmb="1" style="margin-top:8px;color:#ff8b8e">Quitar franja</button>' : ""}
+    </div>`).join("") + '<button class="btn" data-addb="1" style="margin-top:10px">+ Otra franja</button>';
+  const m = d.meta || { title: "", artist: "", album: "", comment: "" };
+  el.innerHTML = `<h4>${id ? "Editar evento" : "Nuevo evento"}</h4>
+    <label>Nombre</label><input type="text" data-f="name" maxlength="70" placeholder="Ej.: Mañana musical o Himno de la emisora" value="${esc(d.name)}">
+    <label>Tipo ${ih("evType")}</label><select data-f="__type">
+      <option value="auto" ${d.kind === "auto" ? "selected" : ""}>Franja AutoDJ</option>
+      <option value="audio" ${d.kind !== "auto" ? "selected" : ""}>Evento de audio</option></select>
+    ${d.kind !== "auto" ? `<label>Fuente del audio ${ih("evSrc")}</label><select data-f="__src">
+      <option value="track" ${src === "track" ? "selected" : ""}>Pista de la biblioteca</option>
+      <option value="random" ${src === "random" ? "selected" : ""}>Pista aleatoria</option>
+      <option value="latest" ${src === "latest" ? "selected" : ""}>La más reciente de una lista</option>
+      <option value="url" ${src === "url" ? "selected" : ""}>Audio de internet</option></select>` : ""}
+    <label class="chk"><input type="checkbox" data-f="enabled" ${d.enabled ? "checked" : ""}> Evento activo</label>
+
+    <h5>Programación ${ih("evSched")}</h5>
+    ${franjas}
+    ${isStream ? `<label>Fundido de entrada y salida (s)</label><input type="number" min="0" max="30" data-f="fadeSecs" value="${d.fadeSecs ?? 3}">` : ""}
+
+    ${d.kind === "auto" ? `<h5>Fuente de la franja</h5>${listSel("Tomar las canciones de")}
+      <label class="chk"><input type="checkbox" data-f="clearList" ${d.clearList ? "checked" : ""}> Limpiar la lista al asignar la fuente ${ih("evClear")}</label>` : ""}
+
+    ${d.kind === "insert" ? `<h5>Cuándo suena ${ih("evWhen")}</h5><select data-f="onTimeout">
+      <option value="next" ${d.onTimeout === "next" ? "selected" : ""}>Como siguiente canción (sin cortar)</option>
+      <option value="force" ${d.onTimeout === "force" ? "selected" : ""}>Esperar como mucho… y luego forzar</option>
+      <option value="cancel" ${d.onTimeout === "cancel" ? "selected" : ""}>Esperar como mucho… y si no, cancelar</option></select>
+      ${d.onTimeout !== "next" ? `<label>Espera máxima (s)</label><input type="number" min="0" max="3600" data-f="maxWaitSecs" value="${d.maxWaitSecs || 0}">` : ""}` : ""}
+
+    ${d.kind === "insert" && src === "track" ? `<h5>Pista de la biblioteca</h5>
+      <div class="pick">${d.trackId ? `<span>${esc(d.trackTitle || "Pista elegida")}</span>` : '<span class="snapnote">Ninguna elegida</span>'}<button class="small" data-picktrk="1">${d.trackId ? "Cambiar" : "Elegir pista"}</button></div>` : ""}
+    ${d.kind === "insert" && (src === "random" || src === "latest") ? `<h5>${src === "latest" ? "La más reciente de una lista" : "Pista aleatoria"}</h5>${listSel("Tomarla de")}
+      ${src === "random" ? `<h5 style="margin-top:12px">No repetir ${ih("evRepeat")}</h5>
+        <div class="row3"><label>En esta hora (días)<input type="number" min="0" max="365" data-f="noRepeatSlotDays" value="${d.noRepeatSlotDays || 0}"></label>
+        <label>En el evento (días)<input type="number" min="0" max="365" data-f="noRepeatEventDays" value="${d.noRepeatEventDays || 0}"></label>
+        <label>En antena (min)<input type="number" min="0" max="10080" data-f="noRepeatAirMins" value="${d.noRepeatAirMins || 0}"></label></div>` : ""}` : ""}
+
+    ${isStream ? `<h5>Audio de internet ${ih("evStream")}</h5><input type="text" data-f="streamUrl" placeholder="https://servidor/stream.mp3, …/playlist.m3u8 o ruta de archivo" value="${esc(d.streamUrl || "")}">
+      <h5>Lo que se muestra mientras suena ${ih("evMeta")}</h5>
+      <label>Título</label><input type="text" data-m="title" value="${esc(m.title || "")}" placeholder="${esc(d.name || "")}">
+      <label>Artista / subtítulo</label><input type="text" data-m="artist" value="${esc(m.artist || "")}">
+      <label>Álbum</label><input type="text" data-m="album" value="${esc(m.album || "")}">
+      <label>Comentario</label><input type="text" data-m="comment" value="${esc(m.comment || "")}">` : ""}
+
+    <div style="height:14px"></div>
+    <button class="btn" data-save="1" style="background:var(--accent);border-color:var(--accent);color:#fff">Guardar</button>
+    ${id ? '<div class="grid2"><button class="btn" data-dup="1">Duplicar</button><button class="btn" data-del="1" style="color:#ff8b8e">Borrar</button></div><div style="height:10px"></div>' : ""}
+    <button class="btn" data-close="1">Cancelar</button>`;
+  el.oninput = (e) => {
+    const t = e.target;
+    if (t.dataset.m) { d.meta = { ...(d.meta || { title: "", artist: "", album: "", comment: "" }), [t.dataset.m]: t.value }; return; }
+    const f = t.dataset.f;
+    if (!f) return;
+    if (f === "__type") { d.kind = t.value === "auto" ? "auto" : d.streamUrl && evSource(d) === "url" ? "stream" : "insert"; fixSchedules(d); return renderEventEditor(); }
+    if (f === "__src") {
+      if (t.value === "url") d.kind = "stream";
+      else { d.kind = "insert"; d.trackMode = t.value === "track" ? "fixed" : t.value; }
+      fixSchedules(d);
+      return renderEventEditor();
+    }
+    if (t.type === "checkbox") { d[f] = t.checked; return; }
+    const fr = t.closest("[data-b]");
+    const v = t.type === "number" ? Number(t.value) : t.value;
+    if (fr) d.schedules[Number(fr.dataset.b)][f] = v; else d[f] = v;
+    if (f === "onTimeout" || f === "sourceKind") {
+      if (f === "sourceKind") d.sourceId = d.sourceKind === "block" ? (blocks[0]?.id || "a") : "a";
+      return renderEventEditor();
+    }
+  };
+  el.onclick = (e) => {
+    const t = e.target.closest("button");
+    if (!t || t.dataset.help) return;
+    const fr = t.closest("[data-b]");
+    const b = fr ? d.schedules[Number(fr.dataset.b)] : null;
+    if (t.dataset.day && b) { const n = Number(t.dataset.day); b.days = b.days.includes(n) ? b.days.filter((x) => x !== n) : [...b.days, n].sort(); return renderEventEditor(); }
+    if (t.dataset.rmt && b) { b.times.splice(Number(t.dataset.rmt), 1); return renderEventEditor(); }
+    if (t.dataset.addt && b) { const v = fr.querySelector("[data-newt]").value; if (v && !b.times.includes(v)) b.times = [...b.times, v].sort(); return renderEventEditor(); }
+    if (t.dataset.rmb && fr) { d.schedules.splice(Number(fr.dataset.b), 1); return renderEventEditor(); }
+    if (t.dataset.addb) { d.schedules.push(isStream ? { id: `s${Date.now().toString(36)}`, days: [1, 2, 3, 4, 5, 6, 7], times: [], start: "", end: "" } : { id: `s${Date.now().toString(36)}`, days: [1, 2, 3, 4, 5, 6, 7], times: [] }); return renderEventEditor(); }
+    if (t.dataset.picktrk) {
+      return openSearch({ name: "el evento", onPick: (hit) => { d.trackId = hit.id; d.trackTitle = `${hit.title}${hit.artist ? " — " + hit.artist : ""}`; renderEventEditor(); } });
+    }
+    if (t.dataset.close) return closeEditor();
+    if (t.dataset.del) { if (confirm(`¿Borrar «${d.name || "sin nombre"}»?`)) { cmd({ cmd: "cfgDelete", kind: "event", id }); closeEditor(); } return; }
+    if (t.dataset.dup) { cmd({ cmd: "cfgDuplicate", kind: "event", id }); toast("Duplicado (queda apagado)"); return closeEditor(); }
+    if (t.dataset.save) {
+      if (!String(d.name || "").trim()) return toast("Ponle un nombre");
+      const sch = d.schedules || [];
+      if (!sch.length || sch.some((b) => !(b.days || []).length)) return toast("Cada franja necesita al menos un día");
+      if (isStream ? sch.some((b) => !b.start || !b.end) : sch.some((b) => !(b.times || []).length)) return toast(isStream ? "Pon la hora de inicio y de fin" : "Añade al menos una hora en cada franja");
+      if (d.kind === "insert" && evSource(d) === "track" && !d.trackId) return toast("Elige la pista");
+      if (isStream && !String(d.streamUrl || "").trim()) return toast("Pon la dirección del audio");
+      const patch = {
+        name: d.name, enabled: !!d.enabled, kind: d.kind, schedules: sch,
+        sourceKind: d.sourceKind || "library", sourceId: d.sourceId || "a",
+        trackMode: d.trackMode || "random", trackId: d.trackId || "",
+        onTimeout: d.onTimeout || "next", maxWaitSecs: d.maxWaitSecs || 0,
+        clearList: !!d.clearList, fadeSecs: d.fadeSecs ?? 3,
+        noRepeatSlotDays: d.noRepeatSlotDays || 0, noRepeatEventDays: d.noRepeatEventDays || 0, noRepeatAirMins: d.noRepeatAirMins || 0,
+        streamUrl: d.streamUrl || "",
+        meta: isStream && d.meta && Object.values(d.meta).some((x) => String(x || "").trim()) ? d.meta : isStream ? null : undefined,
+      };
+      if (id) cmd({ cmd: "cfgSave", kind: "event", id, patch }); else cmd({ cmd: "cfgNewEvent", patch });
+      toast("Guardado");
+      closeEditor();
+    }
+  };
+}
+/** Las franjas de internet llevan inicio y fin; las demás, horas sueltas. */
+function fixSchedules(d) {
+  (d.schedules || []).forEach((b) => {
+    if (d.kind === "stream") { b.start = b.start || (b.times || [])[0] || ""; b.end = b.end || ""; }
+    else if (!(b.times || []).length && b.start) b.times = [b.start];
+  });
 }
 
 function closeEditor() {
