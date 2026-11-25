@@ -1842,7 +1842,7 @@ function MusicBrowserBase({
               <div className="fav-bar" onClick={(e) => e.stopPropagation()}>
                 {(["all", "listeners", "operators"] as const).map((w) => (
                   <button key={w} type="button" className={`fchip ${favWho === w ? "fchip-on" : ""}`} onClick={() => setFavWho(w)}>
-                    {w === "all" ? "Todos" : w === "listeners" ? "♥ Oyentes" : "★ Operarios"}
+                    {w === "all" ? "Todos" : w === "listeners" ? "♥ Oyentes" : "♥ Operarios"}
                   </button>
                 ))}
                 <span className="spacer" />
@@ -1857,7 +1857,7 @@ function MusicBrowserBase({
               ) : favRows.length === 0 ? (
                 <div className="empty-note">
                   Todavía no hay favoritos. Aquí se verán las canciones que los oyentes marcan con ♥ en la app de NGRADIO y
-                  las que los operarios marcan con ★ en OmniCaster Music.
+                  las que los operarios marcan con ♥ en OmniCaster Music.
                 </div>
               ) : (
                 favRows.map(({ item, track }) => {
@@ -1866,8 +1866,8 @@ function MusicBrowserBase({
                       className="bcell bcol-dur brow-favs"
                       title={`${item.listeners} oyentes · ${item.operators} operarios${item.lastAt ? ` · último: ${new Date(item.lastAt).toLocaleString("es-ES")}` : ""}`}
                     >
-                      {item.listeners > 0 && <span className="fav-l">♥ {item.listeners}</span>}
-                      {item.operators > 0 && <span className="fav-o">★ {item.operators}</span>}
+                      {item.listeners > 0 && <span className="fav-l" title="Oyentes (app de NGRADIO)">♥ {item.listeners}</span>}
+                      {item.operators > 0 && <span className="fav-o" title="Operarios (OmniCaster Music)">♥ {item.operators}</span>}
                     </span>
                   );
                   return track ? (
