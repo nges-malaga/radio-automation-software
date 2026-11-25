@@ -299,24 +299,6 @@ export function renameBlock(id: string, name: string): Promise<void> {
 export function blockSetCover(id: string, file: string | null): Promise<string> {
   return invoke<string>("block_set_cover", { id, file });
 }
-/** Una canción marcada como favorita (la nube da cuántos «me gusta» tiene en total). */
-export interface FavoriteItem {
-  /** Id de la canción en la biblioteca, si la nube la ha reconocido */
-  trackId?: string | null;
-  title: string;
-  artist: string;
-  album?: string;
-  cover?: string;
-  /** Cuántas personas la tienen en favoritos */
-  likes: number;
-  /** Último marcado (epoch ms) */
-  lastAt?: number;
-}
-export async function cloudFavorites(): Promise<FavoriteItem[]> {
-  const r = await invoke<{ items?: FavoriteItem[] }>("cloud_favorites");
-  return Array.isArray(r?.items) ? r.items : [];
-}
-
 /** Portada generada por IA en la nube para una lista. */
 export function blockCoverAi(id: string): Promise<string> {
   return invoke<string>("block_cover_ai", { id });

@@ -5272,18 +5272,3 @@ label .help-inline { margin-left: 6px; }
 .pb-autodj { display: flex; align-items: center; gap: 12px; }
 .pb-rotation { display: flex; flex-direction: column; gap: 2px; }
 .pb-mini-label { font-size: 9.5px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text-faint); line-height: 1; padding-left: 2px; }
-
-/* Biblioteca › Favoritos */
-.fav-bar { display: flex; align-items: center; gap: 6px; padding: 4px 8px 8px; }
-.fav-bar .spacer { flex: 1; }
-.brow-favs { display: flex; justify-content: flex-end; gap: 8px; white-space: nowrap; font-family: var(--mono); font-size: 11.5px; }
-.fav-l { color: #ff6b8a; }
-.fav-o { color: #f0b429; }
-.brow-ext { opacity: .7; cursor: default; }
-.browser-cols.fav-cols, .fav-rows .brow { grid-template-columns: 30px minmax(0, 1fr) 120px 58px 92px; }
-@container music (max-width: 620px) {
-  .browser-cols.fav-cols, .fav-rows .brow { grid-template-columns: 30px minmax(0, 1fr) 84px 92px; }
-}
-@container music (max-width: 480px) {
-  .browser-cols.fav-cols, .fav-rows .brow { grid-template-columns: 30px minmax(0, 1fr) 92px; }
-}

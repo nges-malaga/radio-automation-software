@@ -1435,27 +1435,3 @@ pub async fn block_cover_ai(state: tauri::State<'_, crate::AppState>, id: String
     .map_err(|e| e.to_string())?
 }
 
-// ------------------------------------------------------------ favoritos
-
-/// Favoritos de la gente, juntos: los «me gusta» de los oyentes (app de
-/// NGRADIO) y las estrellas de los operarios (OmniCaster Music). Los junta la
-/// nube; aquí se pasan tal cual (`{ items: [...] }`).
-#[tauri::command]
-pub async fn cloud_favorites(state: tauri::State<'_, crate::AppState>) -> Result<Value, String> {
-    let dir = state.data_dir.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let join = crate::cloud::read_join(&dir).ok_or("Este equipo no está conectado a la nube")?;
-        let resp = agent()
-            .get(&format!("{}/v1/station/favorites", join.api))
-            .set("Authorization", &format!("Bearer {}", join.token))
-            .call()
-            .map_err(|e| match e {
-                ureq::Error::Status(404, _) => "La nube aún no da los favoritos (hay que actualizarla)".to_string(),
-                e => net_err(e),
-            })?;
-        serde_json::from_str::<Value>(&resp.into_string().map_err(|e| e.to_string())?).map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
