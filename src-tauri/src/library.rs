@@ -43,6 +43,9 @@ pub struct Track {
     /// Código ISRC (12 caracteres: 2 letras, 3 alfanuméricos y 7 cifras, sin guiones).
     #[serde(skip_serializing_if = "String::is_empty")]
     pub isrc: String,
+    /// Enlaces en las plataformas musicales (en la nube, «links»).
+    #[serde(skip_serializing_if = "crate::platforms::Links::is_empty")]
+    pub links: crate::platforms::Links,
     pub duration_secs: f64,
     /// Enlace al archivo (ruta absoluta). Puede quedar inaccesible sin que la
     /// cancion muera: el estado `missing` se calcula al listar.
@@ -1118,6 +1121,7 @@ pub struct TrackResolved {
     pub genre: String,
     pub year: String,
     pub isrc: String,
+    pub links: crate::platforms::Links,
     pub duration_secs: f64,
     pub file: String,
     pub original_name: String,
@@ -1174,6 +1178,7 @@ impl TrackResolved {
             genre: t.genre,
             year: t.year,
             isrc: t.isrc,
+            links: t.links,
             duration_secs: t.duration_secs,
             file: t.file,
             original_name: t.original_name,
@@ -1325,6 +1330,7 @@ pub fn import_files(
             genre,
             year,
             isrc,
+            links: Default::default(),
             duration_secs: (duration * 100.0).round() / 100.0,
             file: dest.to_string_lossy().into_owned(),
             original_name: src
@@ -1407,6 +1413,7 @@ fn catalog_in_place(data_dir: &Path, tracks: &mut Vec<Track>, entries: Vec<PathB
             genre,
             year,
             isrc,
+            links: Default::default(),
             duration_secs: (duration * 100.0).round() / 100.0,
             file: path.to_string_lossy().into_owned(),
             original_name: path
@@ -1598,6 +1605,9 @@ pub struct TrackPatch {
     /// ISRC: se guarda normalizado; vacío lo borra; si no cumple el formato, error.
     #[serde(default)]
     pub isrc: Option<String>,
+    /// Enlaces a plataformas: se validan; vacío borra ese enlace.
+    #[serde(default)]
+    pub links: Option<crate::platforms::Links>,
     pub tags: Option<Vec<String>>,
     #[serde(default)]
     pub language: Option<String>,
@@ -1733,6 +1743,9 @@ pub fn apply_patch(data_dir: &Path, id: &str, patch: TrackPatch) -> Result<Optio
         }
         if let Some(v) = patch.genre {
             t.genre = v.trim().to_string();
+        }
+        if let Some(l) = patch.links {
+            t.links = l.cleaned()?;
         }
         if let Some(v) = patch.isrc {
             let v = v.trim();
@@ -1990,6 +2003,7 @@ pub struct TrackDetails {
     pub genre: String,
     pub year: String,
     pub isrc: String,
+    pub links: crate::platforms::Links,
     pub duration_secs: f64,
     pub file: String,
     pub original_name: String,
@@ -2082,6 +2096,7 @@ pub fn track_details(state: State<'_, AppState>, id: String) -> Result<TrackDeta
         genre: t.genre.clone(),
         year: t.year.clone(),
         isrc: t.isrc.clone(),
+        links: t.links.clone(),
         duration_secs: (duration * 100.0).round() / 100.0,
         file: t.file.clone(),
         original_name: t.original_name.clone(),
@@ -2820,6 +2835,7 @@ pub fn import_playlist(
             genre,
             year,
             isrc,
+            links: Default::default(),
             duration_secs: (duration * 100.0).round() / 100.0,
             file: file.to_string_lossy().into_owned(),
             original_name: src

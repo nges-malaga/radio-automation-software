@@ -5272,3 +5272,14 @@ label .help-inline { margin-left: 6px; }
 .pb-autodj { display: flex; align-items: center; gap: 12px; }
 .pb-rotation { display: flex; flex-direction: column; gap: 2px; }
 .pb-mini-label { font-size: 9.5px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text-faint); line-height: 1; padding-left: 2px; }
+
+/* Enlaces a plataformas */
+.plinks { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.plink { background: none; border: 0; padding: 2px; cursor: pointer; display: inline-grid; place-items: center; border-radius: 4px; }
+.plink:hover { background: var(--panel-2); }
+.plinks-edit legend { display: flex; align-items: center; gap: 10px; }
+.plinks-find { margin-left: auto; }
+.plinks-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; }
+.plinks-field { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.plinks-ico { flex: 0 0 18px; display: grid; place-items: center; }
+.plinks-field input { flex: 1; min-width: 0; font-size: 12px; }

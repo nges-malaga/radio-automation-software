@@ -295,6 +295,10 @@ export function createBlock(name: string): Promise<Block> {
 export function renameBlock(id: string, name: string): Promise<void> {
   return invoke("rename_block", { id, name });
 }
+/** Busca los enlaces de una canción en las plataformas (no guarda; rellena solo lo vacío). */
+export function trackLinksLookup(id: string): Promise<import("./types").TrackLinks> {
+  return invoke("track_links_lookup", { id });
+}
 /** Portada de una lista desde una imagen de este equipo (null = quitarla). */
 export function blockSetCover(id: string, file: string | null): Promise<string> {
   return invoke<string>("block_set_cover", { id, file });

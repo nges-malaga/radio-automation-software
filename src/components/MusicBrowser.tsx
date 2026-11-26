@@ -1,7 +1,7 @@
 import { DeezerSearch } from "./DeezerSearch";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { languageFlag, languageName } from "../languages";
-import type { AiSettings, Block, HistoryEntry, HourWindow, MediaType, PlaylistImportReport, Track, TrackPatch } from "../types";
+import type { AiSettings, Block, HistoryEntry, HourWindow, MediaType, PlaylistImportReport, Track, TrackLinks, TrackPatch } from "../types";
 import { inMusic, mediaTypeLabel, useMediaTypes, wantsEnergy } from "../mediaTypes";
 import {
   updateTrack,
@@ -23,7 +23,7 @@ import { ScheduleEditor, newScheduleBlock } from "./ScheduleEditor";
 import { beginDrag, registerDropZone } from "../dnd";
 import { GalleryHeader, MusicGallery, coverSrc, matchesSel } from "./MusicGallery";
 import { ExplorerView } from "./ExplorerView";
-import { pickScanFolder, scanFolder, aiWindowPayloadSet, blockSetCover, blockCoverAi, pickImageFile } from "../api";
+import { pickScanFolder, scanFolder, aiWindowPayloadSet, blockSetCover, blockCoverAi, pickImageFile, trackLinksLookup } from "../api";
 import { openAiWindow } from "../bridge";
 import { listen } from "@tauri-apps/api/event";
 import { IS_WEB } from "../platform";
@@ -92,6 +92,7 @@ import {
 } from "../icons";
 import { Help } from "./Help";
 import { FilterBar } from "./FilterBar";
+import { PLATFORMS, PlatformIcon, linkOk } from "../platformLinks";
 import { EMPTY_FILTER, filterCount, matchFilter } from "../trackFilters";
 import type { TrackFilter } from "../trackFilters";
 
@@ -154,6 +155,7 @@ interface EditState {
   genre: string;
   year: string;
   isrc: string;
+  links: TrackLinks;
   /** Lo que había antes de «Rellenar desde Deezer» (para deshacer campo a campo) */
   dz?: Partial<Record<DzField, string>>;
   /** Carátula anterior a la de Deezer */
@@ -857,7 +859,7 @@ function MusicBrowserBase({
     return ids.includes(id) ? ids : [id];
   };
   const editKey = (e: Omit<EditState, "orig" | "busy" | "navIds">) =>
-    JSON.stringify([e.title, e.artist, e.albumArtist, e.album, e.genre, e.year, e.isrc, e.tagsText, e.language, e.disabled, e.energy, e.mood, e.themesText, e.hours, e.mediaType, e.blocks, e.coverChange]);
+    JSON.stringify([e.title, e.artist, e.albumArtist, e.album, e.genre, e.year, e.isrc, e.links, e.tagsText, e.language, e.disabled, e.energy, e.mood, e.themesText, e.hours, e.mediaType, e.blocks, e.coverChange]);
   const makeEdit = (t: Track, navIds: string[]): EditState => {
     const e = {
       id: t.id,
@@ -868,6 +870,7 @@ function MusicBrowserBase({
       genre: t.genre,
       year: t.year,
       isrc: t.isrc ?? "",
+      links: { ...(t.links ?? {}) },
       tagsText: t.tags.join(", "),
       language: t.language ?? "",
       disabled: !!t.disabled,
@@ -897,6 +900,7 @@ function MusicBrowserBase({
     setEdit(makeEdit(t, navIds ?? navFor(t.id)));
   };
 
+  const [linksBusy, setLinksBusy] = useState(false);
   /** Lo que había antes de Deezer en un campo, con «Deshacer» (si sigue cambiado). */
   const wasDz = (f: DzField) => {
     const prev = edit?.dz?.[f];
@@ -931,6 +935,7 @@ function MusicBrowserBase({
         genre: edit.genre.trim(),
         year: edit.year.trim(),
         isrc: edit.isrc.replace(/[-\s]/g, "").toUpperCase(),
+        links: Object.fromEntries(PLATFORMS.map((p) => [p.key, (edit.links[p.key] ?? "").trim()])) as TrackLinks,
         language: edit.language,
         disabled: edit.disabled,
         energy: edit.energy,
@@ -2210,6 +2215,50 @@ function MusicBrowserBase({
                   {wasDz("isrc")}
                 </label>
               </div>
+              <fieldset className="fieldset plinks-edit">
+                <legend>
+                  Escuchar en
+                  <button
+                    type="button"
+                    className="btn btn-sm plinks-find"
+                    disabled={linksBusy}
+                    title="Busca los enlaces que faltan: Deezer → Odesli (song.link) y, si falta alguno, Apple (iTunes) y las API de Spotify y YouTube si tienen clave"
+                    onClick={() => {
+                      const id = edit.id;
+                      setLinksBusy(true);
+                      void trackLinksLookup(id)
+                        .then((found) => {
+                          setEdit((s) => {
+                            if (!s || s.id !== id) return s;
+                            const links = { ...s.links };
+                            let n = 0;
+                            for (const p of PLATFORMS) if (!links[p.key]?.trim() && found[p.key]) { links[p.key] = found[p.key]; n++; }
+                            showToast(n ? `${n} enlace${n === 1 ? "" : "s"} encontrado${n === 1 ? "" : "s"}` : "No se han encontrado enlaces nuevos");
+                            return { ...s, links };
+                          });
+                        })
+                        .catch((e) => showToast(String(e)))
+                        .finally(() => setLinksBusy(false));
+                    }}
+                  >
+                    {linksBusy ? "Buscando…" : "Buscar enlaces"}
+                  </button>
+                </legend>
+                <div className="plinks-grid">
+                  {PLATFORMS.map((p) => (
+                    <label key={p.key} className="plinks-field" title={p.name}>
+                      <span className="plinks-ico" style={{ color: p.color }}><PlatformIcon k={p.key} /></span>
+                      <input
+                        value={edit.links[p.key] ?? ""}
+                        placeholder={p.placeholder}
+                        spellCheck={false}
+                        className={linkOk(p.key, edit.links[p.key] ?? "") ? "" : "input-bad"}
+                        onChange={(e) => setEdit({ ...edit, links: { ...edit.links, [p.key]: e.target.value } })}
+                      />
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
               <div className="field-row">
                 <label className="field" title="Solo la música sale en la vista Música, en el AutoDJ general y en OmniCaster Music">
                   <span className="field-label">Tipo de medio</span>

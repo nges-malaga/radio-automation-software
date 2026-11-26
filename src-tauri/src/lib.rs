@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use tauri::{Emitter, Manager};
 
 pub mod ai;
+pub mod platforms;
 pub mod aidj;
 pub mod aienrich;
 pub mod perflog;
@@ -271,6 +272,7 @@ pub fn run() {
             library::create_block,
             library::rename_block,
             library::block_set_cover,
+            platforms::track_links_lookup,
             cloudsync::block_cover_ai,
             library::delete_block,
             library::set_track_blocks,

@@ -81,6 +81,7 @@ export interface Track {
   year: string;
   /** Código ISRC (12 caracteres, sin guiones) */
   isrc?: string;
+  links?: TrackLinks;
   durationSecs: number;
   /** Ruta absoluta del archivo vinculado */
   file: string;
@@ -238,6 +239,7 @@ export interface TrackPatch {
   year?: string;
   /** ISRC (12 caracteres, sin guiones); "" lo borra */
   isrc?: string;
+  links?: TrackLinks;
   tags?: string[];
   language?: string;
   disabled?: boolean;
@@ -249,6 +251,23 @@ export interface TrackPatch {
 }
 
 /** Configuracion del analisis de metadatos con IA local (Ollama/OpenCode) o en la nube. */
+/** Enlaces de una canción en las plataformas (en la nube, «links»). */
+export interface TrackLinks {
+  spotify?: string;
+  appleMusic?: string;
+  youtube?: string;
+  youtubeMusic?: string;
+  tidal?: string;
+  amazonMusic?: string;
+}
+
+/** Claves opcionales para completar enlaces (solo en este equipo). */
+export interface PlatformApi {
+  spotifyClientId: string;
+  spotifyClientSecret: string;
+  youtubeApiKey: string;
+}
+
 export interface AiSettings {
   /** Motor: "ollama" (servidor local), "opencode" (CLI local) o "cloud" (compatible OpenAI) */
   provider?: "ollama" | "opencode" | "cloud";
@@ -295,6 +314,7 @@ export interface TrackDetails {
   genre: string;
   year: string;
   isrc?: string;
+  links?: TrackLinks;
   durationSecs: number;
   file: string;
   originalName: string;
@@ -1065,6 +1085,7 @@ export interface Settings {
   audioDevices: AudioDeviceSetting[];
   /** Analisis de metadatos con Ollama local */
   ai: AiSettings;
+  platformApi?: PlatformApi;
   /** Bus cuya señal muestra el VU de salida; "" = salida general */
   monitorBusId: string;
   /** Tarjeta de salida del Master; "" = salida predeterminada del sistema */
@@ -1167,6 +1188,7 @@ export interface DeezerTrack {
   genre: string;
   /** ISRC (viene en el detalle de la canción) */
   isrc?: string;
+  links?: TrackLinks;
 }
 
 /** Nivel de un canal del vumetro: 0..1 y dBFS. */

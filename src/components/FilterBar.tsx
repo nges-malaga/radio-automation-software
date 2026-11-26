@@ -175,6 +175,15 @@ export function FilterBar({
                     <option value="disabled">Desactivadas</option>
                   </select>
                 </label>
+                <label className="fbar-field">
+                  <span className="fbar-label">Enlaces</span>
+                  <select value={filter.links ?? ""} onChange={(e) => set({ links: e.target.value as TrackFilter["links"] })}>
+                    <option value="">Cualquiera</option>
+                    <option value="none">Sin enlaces</option>
+                    <option value="partial">Incompletos</option>
+                    <option value="complete">Los 6</option>
+                  </select>
+                </label>
               </div>
             </>
           )}

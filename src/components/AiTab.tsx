@@ -421,7 +421,43 @@ export function AiTab({ settings, onChange, showToast }: Props) {
           </Help>
         </fieldset>
       )}
+      <PlatformKeys settings={settings} onChange={onChange} />
     </>
+  );
+}
+
+/** Claves opcionales para completar los enlaces a plataformas. */
+function PlatformKeys({ settings, onChange }: { settings: Settings; onChange: (s: Settings) => void }) {
+  const k = settings.platformApi ?? { spotifyClientId: "", spotifyClientSecret: "", youtubeApiKey: "" };
+  const set = (p: Partial<typeof k>) => onChange({ ...settings, platformApi: { ...k, ...p } });
+  return (
+    <fieldset className="fieldset">
+      <legend>Enlaces a plataformas</legend>
+      <Help>
+        «Buscar enlaces» (ficha de la canción y Librería) usa primero Odesli (song.link) a partir de la canción en
+        Deezer, sin claves. Lo que no encuentre: Apple Music por la búsqueda pública de iTunes, y Spotify y YouTube
+        por sus API si pones aquí las claves. Tidal y Amazon Music solo llegan por Odesli. Las claves se quedan en
+        este equipo: no se sincronizan.
+      </Help>
+      <div className="field-row">
+        <label className="field">
+          <span className="field-label">Spotify · Client ID</span>
+          <input type="text" value={k.spotifyClientId} spellCheck={false} onChange={(e) => set({ spotifyClientId: e.target.value.trim() })} />
+        </label>
+        <label className="field">
+          <span className="field-label">Spotify · Client secret</span>
+          <input type="password" value={k.spotifyClientSecret} onChange={(e) => set({ spotifyClientSecret: e.target.value.trim() })} />
+        </label>
+      </div>
+      <Help>
+        En developer.spotify.com › Dashboard › Create app (sin redirección); copia el Client ID y el Client secret.
+      </Help>
+      <label className="field">
+        <span className="field-label">YouTube Data API · clave</span>
+        <input type="password" value={k.youtubeApiKey} onChange={(e) => set({ youtubeApiKey: e.target.value.trim() })} />
+      </label>
+      <Help>En console.cloud.google.com: activa «YouTube Data API v3» y crea una clave de API.</Help>
+    </fieldset>
   );
 }
 

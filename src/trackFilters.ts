@@ -19,6 +19,8 @@ export interface TrackFilter {
   /** Entradas en los últimos N días (0 = cualquiera) */
   addedDays: number;
   status: "" | "ok" | "missing" | "pending" | "disabled";
+  /** Enlaces a plataformas: sin ninguno, incompletos o completos */
+  links?: "" | "none" | "partial" | "complete";
 }
 
 export const EMPTY_FILTER: TrackFilter = {
@@ -57,7 +59,8 @@ export function filterCount(f: TrackFilter): number {
     (f.mood.trim() ? 1 : 0) +
     (f.quality ? 1 : 0) +
     (f.addedDays ? 1 : 0) +
-    (f.status ? 1 : 0)
+    (f.status ? 1 : 0) +
+    (f.links ? 1 : 0)
   );
 }
 
@@ -81,6 +84,10 @@ export function matchFilter(t: Track, f: TrackFilter, nowSecs = Date.now() / 100
     const ok =
       f.status === "disabled" ? !!t.disabled : f.status === "pending" ? pending : f.status === "missing" ? missing : !t.missing && !t.disabled;
     if (!ok) return false;
+  }
+  if (f.links) {
+    const n = ["spotify", "appleMusic", "youtube", "youtubeMusic", "tidal", "amazonMusic"].filter((k) => !!(t.links as Record<string, string | undefined> | undefined)?.[k]).length;
+    if (f.links === "none" ? n > 0 : f.links === "complete" ? n < 6 : n === 0 || n === 6) return false;
   }
   return true;
 }

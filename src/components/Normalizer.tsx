@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent } from "react";
-import { analyzeTrack, moveTracksBlock } from "../api";
+import { analyzeTrack, moveTracksBlock, trackLinksLookup, updateTrack } from "../api";
+import { PLATFORMS, linksCount } from "../platformLinks";
 import type { AnalysisResult, Block, Track } from "../types";
 import { effectiveDuration } from "../types";
 import { IconWave, IconX } from "../icons";
@@ -93,6 +94,8 @@ interface PaneProps {
   errors: Map<string, string>;
   skipAnalyzed: boolean;
   onSkipAnalyzed: (skip: boolean) => void;
+  /** Buscar los enlaces a plataformas de estas canciones */
+  onFindLinks: (ids: string[]) => void;
 }
 
 function Pane({
@@ -112,6 +115,7 @@ function Pane({
   errors,
   skipAnalyzed,
   onSkipAnalyzed,
+  onFindLinks,
 }: PaneProps) {
   const [mode, setMode] = useState<Mode>("blocks");
   const [search, setSearch] = useState("");
@@ -585,6 +589,15 @@ function Pane({
         <button
           type="button"
           className="btn btn-sm"
+          disabled={busy || (selected.size === 0 && visible.length === 0)}
+          title="Busca los enlaces de Spotify, Apple Music, YouTube, YouTube Music, Tidal y Amazon Music que falten (Deezer → Odesli y, si falta, Apple y las API con clave). Sin selección: todas las visibles."
+          onClick={() => onFindLinks(selected.size ? Array.from(selected) : visible.map((t) => t.id))}
+        >
+          Buscar enlaces
+        </button>
+        <button
+          type="button"
+          className="btn btn-sm"
           disabled={busy || selected.size === 0 || !other.blockId}
           title={other.blockId ? undefined : "Elige una lista en la otra columna"}
           onClick={() => onMove(Array.from(selected), side === "a" ? "b" : "a")}
@@ -666,6 +679,42 @@ export function Normalizer({
   const [selB, setSelB] = useState<Set<string>>(new Set());
   const [errors, setErrors] = useState<Map<string, string>>(new Map());
   const [running, setRunning] = useState<RunningState | null>(null);
+  /** Búsqueda de enlaces en lote: avance y cancelación */
+  const [linksRun, setLinksRun] = useState<{ done: number; total: number; found: number } | null>(null);
+  const linksStop = useRef(false);
+  const findLinks = async (ids: string[]) => {
+    const byId = new Map(all.map((t) => [t.id, t]));
+    // Solo las que no tienen los seis y no están desactivadas ni sin archivo
+    const todo = ids.filter((id) => {
+      const t = byId.get(id);
+      return t && !t.disabled && linksCount(t.links) < PLATFORMS.length;
+    });
+    if (!todo.length) {
+      showToast("Esas canciones ya tienen todos los enlaces");
+      return;
+    }
+    linksStop.current = false;
+    let found = 0;
+    setLinksRun({ done: 0, total: todo.length, found: 0 });
+    for (let i = 0; i < todo.length; i++) {
+      if (linksStop.current) break;
+      const t = byId.get(todo[i])!;
+      try {
+        const l = await trackLinksLookup(t.id);
+        const before = linksCount(t.links);
+        const after = linksCount(l);
+        if (after > before) {
+          await updateTrack(t.id, { links: l });
+          found += after - before;
+        }
+      } catch {
+        /* sigue con la siguiente */
+      }
+      setLinksRun({ done: i + 1, total: todo.length, found });
+    }
+    setLinksRun(null);
+    showToast(`Enlaces: ${found} nuevo${found === 1 ? "" : "s"} en ${todo.length} canciones${linksStop.current ? " (detenido)" : ""}`);
+  };
   const [paused, setPaused] = useState(false);
   const [skipAnalyzed, setSkipAnalyzed] = useState(false);
   const [trimId, setTrimId] = useState("");
@@ -963,6 +1012,7 @@ export function Normalizer({
           errors={errors}
           skipAnalyzed={skipAnalyzed}
           onSkipAnalyzed={setSkipAnalyzed}
+          onFindLinks={(ids) => void findLinks(ids)}
         />
 
         <div className="norm-move">
@@ -1026,9 +1076,23 @@ export function Normalizer({
           errors={errors}
           skipAnalyzed={skipAnalyzed}
           onSkipAnalyzed={setSkipAnalyzed}
+          onFindLinks={(ids) => void findLinks(ids)}
         />
       </div>
 
+      {linksRun && (
+        <div className="norm-progress">
+          <div className="norm-bar">
+            <span style={{ width: `${(linksRun.done / Math.max(1, linksRun.total)) * 100}%` }} />
+          </div>
+          <span className="norm-progress-txt">
+            Buscando enlaces · {linksRun.done}/{linksRun.total} · {linksRun.found} encontrados
+          </span>
+          <button type="button" className="ghost-btn" onClick={() => (linksStop.current = true)}>
+            Detener
+          </button>
+        </div>
+      )}
       {running && (
         <div className="norm-progress">
           <div className="norm-bar">

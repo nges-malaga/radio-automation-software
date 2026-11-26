@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { PlatformLinksRow } from "../platformLinks";
 import type { TrackDetails } from "../types";
 import { mediaTypeLabel } from "../mediaTypes";
 import { closeOnBackdrop } from "../backdrop";
@@ -147,6 +148,8 @@ export function TrackDetailsModal({ trackId, onClose, onEdit, navIds, onNavigate
                 <span className="prop-v">{details.year || "—"}</span>
                 <span className="prop-k">ISRC</span>
                 <span className="prop-v mono">{details.isrc || "—"}</span>
+                <span className="prop-k">Escuchar en</span>
+                <span className="prop-v"><PlatformLinksRow links={details.links} /></span>
                 <span className="prop-k">Duración</span>
                 <span className="prop-v">{fmtTime(details.durationSecs)}</span>
                 <span className="prop-k">Normalización</span>

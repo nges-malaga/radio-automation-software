@@ -187,6 +187,15 @@ fn set_media_rules(list: &[MediaTypeCfg]) {
     }
 }
 
+/// Claves para completar los enlaces de las canciones cuando Odesli no los da.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PlatformApi {
+    pub spotify_client_id: String,
+    pub spotify_client_secret: String,
+    pub youtube_api_key: String,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -308,6 +317,8 @@ pub struct Settings {
     pub audio_devices: Vec<AudioDeviceSetting>,
     /// Analisis de metadatos con Ollama local.
     pub ai: AiSettings,
+    /// Claves de las API de plataformas (enlaces de las canciones). Solo en este equipo.
+    pub platform_api: PlatformApi,
     /// Bus cuya señal muestra el VU de salida; vacio = salida general.
     pub monitor_bus_id: String,
     /// Tarjeta de salida del Master; vacio = salida predeterminada.
@@ -1111,6 +1122,7 @@ impl Default for Settings {
             mixer_buses: Vec::new(),
             audio_devices: Vec::new(),
             ai: AiSettings::default(),
+            platform_api: PlatformApi::default(),
             monitor_bus_id: String::new(),
             master_output_device_id: String::new(),
             monitor_output_device_id: String::new(),
@@ -1128,7 +1140,7 @@ pub struct HistoryEntry {
     pub played_at: u64, // epoch segundos
 }
 
-fn read_settings(data_dir: &PathBuf) -> Settings {
+pub(crate) fn read_settings(data_dir: &PathBuf) -> Settings {
     let s: Settings = std::fs::read(data_dir.join(SETTINGS_FILE))
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
