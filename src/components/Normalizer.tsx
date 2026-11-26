@@ -695,12 +695,15 @@ export function Normalizer({
     }
     linksStop.current = false;
     let found = 0;
+    const errs = new Set<string>();
     setLinksRun({ done: 0, total: todo.length, found: 0 });
     for (let i = 0; i < todo.length; i++) {
       if (linksStop.current) break;
       const t = byId.get(todo[i])!;
       try {
-        const l = await trackLinksLookup(t.id);
+        const { links: l, notes } = await trackLinksLookup(t.id);
+        // Solo los fallos de servicio (claves, cuota, conexión), no «no está».
+        for (const n of notes) if (!/no está|solo llegan/.test(n)) errs.add(n);
         const before = linksCount(t.links);
         const after = linksCount(l);
         if (after > before) {
@@ -713,7 +716,10 @@ export function Normalizer({
       setLinksRun({ done: i + 1, total: todo.length, found });
     }
     setLinksRun(null);
-    showToast(`Enlaces: ${found} nuevo${found === 1 ? "" : "s"} en ${todo.length} canciones${linksStop.current ? " (detenido)" : ""}`);
+    showToast(
+      `Enlaces: ${found} nuevo${found === 1 ? "" : "s"} en ${todo.length} canciones${linksStop.current ? " (detenido)" : ""}` +
+        (errs.size ? ` · Avisos: ${[...errs].slice(0, 4).join(" · ")}` : ""),
+    );
   };
   const [paused, setPaused] = useState(false);
   const [skipAnalyzed, setSkipAnalyzed] = useState(false);

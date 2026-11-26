@@ -142,8 +142,21 @@ fn get_json(ag: &ureq::Agent, url: &str, query: &[(&str, &str)], auth: Option<&s
     if let Some(a) = auth {
         req = req.set("Authorization", a);
     }
-    let body = req.call().map_err(|e| e.to_string())?.into_string().map_err(|e| e.to_string())?;
+    let body = req.call().map_err(http_err)?.into_string().map_err(|e| e.to_string())?;
     serde_json::from_str(&body).map_err(|e| e.to_string())
+}
+
+/// Error de red legible: «HTTP 401», «HTTP 429», «sin conexión…».
+fn http_err(e: ureq::Error) -> String {
+    match e {
+        ureq::Error::Status(code, _) => format!("HTTP {code}"),
+        ureq::Error::Transport(t) => format!("sin conexión ({})", t.kind()),
+    }
+}
+
+/// Título sin lo que va tras « - » (« - En vivo», « - Remastered 2011»…).
+fn title_core(t: &str) -> &str {
+    t.split(" - ").next().unwrap_or(t)
 }
 
 /// Texto para comparar: minúsculas, sin acentos, sin lo que va entre paréntesis.
@@ -170,7 +183,7 @@ fn norm(s: &str) -> String {
 
 /// ¿Es la misma canción? (título igual y algún artista en común)
 fn same_song(title: &str, artist: &str, t2: &str, a2: &str) -> bool {
-    let (t1, t2) = (norm(title), norm(t2));
+    let (t1, t2) = (norm(title_core(title)), norm(title_core(t2)));
     if t1.is_empty() || t1 != t2 {
         return false;
     }
@@ -179,30 +192,40 @@ fn same_song(title: &str, artist: &str, t2: &str, a2: &str) -> bool {
     a1.is_empty() || a2n.contains(&a1) || norm(artist).contains(&first(a2))
 }
 
-/// Enlace de la canción en Deezer: por ISRC o buscando título y artista.
-fn deezer_link(ag: &ureq::Agent, isrc: &str, title: &str, artist: &str) -> Option<String> {
+/// Enlace de la canción en Deezer: por ISRC o buscando título y artista
+/// (primero con la búsqueda avanzada y, si no sale, con texto libre).
+fn deezer_link(ag: &ureq::Agent, isrc: &str, title: &str, artist: &str) -> Result<Option<String>, String> {
     if !isrc.is_empty() {
         if let Ok(v) = get_json(ag, &format!("https://api.deezer.com/track/isrc:{isrc}"), &[], None) {
             if let Some(l) = v.get("link").and_then(Value::as_str) {
-                return Some(l.to_string());
+                return Ok(Some(l.to_string()));
             }
         }
     }
-    let q = format!("artist:\"{}\" track:\"{}\"", artist.split(',').next().unwrap_or(artist).trim(), title.trim());
-    let v = get_json(ag, "https://api.deezer.com/search", &[("q", &q), ("limit", "10")], None).ok()?;
-    v.get("data")?.as_array()?.iter().find_map(|it| {
-        let t = it.get("title").and_then(Value::as_str).unwrap_or("");
-        let a = it.get("artist").and_then(|a| a.get("name")).and_then(Value::as_str).unwrap_or("");
-        same_song(title, artist, t, a).then(|| it.get("link").and_then(Value::as_str).map(str::to_string)).flatten()
-    })
+    let a1 = artist.split([',', '&', ';']).next().unwrap_or(artist).trim();
+    let queries = [format!("artist:\"{a1}\" track:\"{}\"", title_core(title).trim()), format!("{a1} {}", title_core(title).trim())];
+    for q in &queries {
+        let v = get_json(ag, "https://api.deezer.com/search", &[("q", q), ("limit", "15")], None)?;
+        let hit = v.get("data").and_then(Value::as_array).and_then(|d| {
+            d.iter().find_map(|it| {
+                let t = it.get("title").and_then(Value::as_str).unwrap_or("");
+                let a = it.get("artist").and_then(|a| a.get("name")).and_then(Value::as_str).unwrap_or("");
+                same_song(title, artist, t, a).then(|| it.get("link").and_then(Value::as_str).map(str::to_string)).flatten()
+            })
+        });
+        if hit.is_some() {
+            return Ok(hit);
+        }
+    }
+    Ok(None)
 }
 
 /// Odesli admite 10 consultas por minuto sin clave: se espacian.
 static ODESLI_LAST: Mutex<Option<Instant>> = Mutex::new(None);
 
-fn odesli(ag: &ureq::Agent, url: &str) -> Option<Links> {
+fn odesli(ag: &ureq::Agent, url: &str) -> Result<Links, String> {
     {
-        let mut last = ODESLI_LAST.lock().ok()?;
+        let mut last = ODESLI_LAST.lock().map_err(|e| e.to_string())?;
         if let Some(t) = *last {
             let wait = Duration::from_millis(6500).saturating_sub(t.elapsed());
             if !wait.is_zero() {
@@ -211,10 +234,10 @@ fn odesli(ag: &ureq::Agent, url: &str) -> Option<Links> {
         }
         *last = Some(Instant::now());
     }
-    let v = get_json(ag, "https://api.song.link/v1-alpha.1/links", &[("url", url), ("userCountry", "ES")], None).ok()?;
-    let by = v.get("linksByPlatform")?;
+    let v = get_json(ag, "https://api.song.link/v1-alpha.1/links", &[("url", url), ("userCountry", "ES")], None)?;
+    let by = v.get("linksByPlatform").ok_or("respuesta sin enlaces")?;
     let get = |k: &str, p: &str| by.get(k).and_then(|x| x.get("url")).and_then(Value::as_str).and_then(|u| clean_link(p, u)).unwrap_or_default();
-    Some(Links {
+    Ok(Links {
         spotify: get("spotify", "spotify"),
         apple_music: get("appleMusic", "appleMusic"),
         youtube: get("youtube", "youtube"),
@@ -225,52 +248,70 @@ fn odesli(ag: &ureq::Agent, url: &str) -> Option<Links> {
 }
 
 /// Apple Music por la búsqueda pública de iTunes (sin clave).
-fn itunes(ag: &ureq::Agent, title: &str, artist: &str) -> Option<String> {
-    let term = format!("{} {}", artist.split(',').next().unwrap_or(artist).trim(), title.trim());
-    let v = get_json(ag, "https://itunes.apple.com/search", &[("term", &term), ("entity", "song"), ("limit", "10"), ("country", "ES")], None).ok()?;
-    v.get("results")?.as_array()?.iter().find_map(|it| {
+fn itunes(ag: &ureq::Agent, title: &str, artist: &str) -> Result<Option<String>, String> {
+    let term = format!("{} {}", artist.split([',', '&', ';']).next().unwrap_or(artist).trim(), title_core(title).trim());
+    let v = get_json(ag, "https://itunes.apple.com/search", &[("term", &term), ("entity", "song"), ("limit", "15"), ("country", "ES")], None)?;
+    let Some(res) = v.get("results").and_then(Value::as_array) else { return Ok(None) };
+    Ok(res.iter().find_map(|it| {
         let t = it.get("trackName").and_then(Value::as_str).unwrap_or("");
         let a = it.get("artistName").and_then(Value::as_str).unwrap_or("");
         if !same_song(title, artist, t, a) {
             return None;
         }
         it.get("trackViewUrl").and_then(Value::as_str).and_then(|u| clean_link("appleMusic", u))
-    })
+    }))
 }
 
 /// Spotify por su API (credenciales de cliente en Ajustes).
-fn spotify(ag: &ureq::Agent, api: &PlatformApi, isrc: &str, title: &str, artist: &str) -> Option<String> {
+fn spotify(ag: &ureq::Agent, api: &PlatformApi, isrc: &str, title: &str, artist: &str) -> Result<Option<String>, String> {
     if api.spotify_client_id.trim().is_empty() || api.spotify_client_secret.trim().is_empty() {
-        return None;
+        return Err("sin claves (pestaña IA)".into());
     }
     use base64::Engine;
     let basic = base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", api.spotify_client_id.trim(), api.spotify_client_secret.trim()));
-    let tok: Value = serde_json::from_str(&ag
+    let tok = ag
         .post("https://accounts.spotify.com/api/token")
         .set("Authorization", &format!("Basic {basic}"))
         .send_form(&[("grant_type", "client_credentials")])
-        .ok()?
+        .map_err(|e| match e {
+            ureq::Error::Status(400 | 401, _) => "Client ID o Client secret incorrectos".to_string(),
+            e => http_err(e),
+        })?
         .into_string()
-        .ok()?)
-    .ok()?;
-    let bearer = format!("Bearer {}", tok.get("access_token")?.as_str()?);
-    let q = if isrc.is_empty() { format!("track:{} artist:{}", title.trim(), artist.split(',').next().unwrap_or(artist).trim()) } else { format!("isrc:{isrc}") };
-    let v = get_json(ag, "https://api.spotify.com/v1/search", &[("q", &q), ("type", "track"), ("limit", "10")], Some(&bearer)).ok()?;
-    v.get("tracks")?.get("items")?.as_array()?.iter().find_map(|it| {
-        let t = it.get("name").and_then(Value::as_str).unwrap_or("");
-        let a = it.get("artists").and_then(|a| a.get(0)).and_then(|a| a.get("name")).and_then(Value::as_str).unwrap_or("");
-        if isrc.is_empty() && !same_song(title, artist, t, a) {
-            return None;
+        .map_err(|e| e.to_string())?;
+    let tok: Value = serde_json::from_str(&tok).map_err(|e| e.to_string())?;
+    let bearer = format!("Bearer {}", tok.get("access_token").and_then(Value::as_str).ok_or("sin token")?);
+    let a1 = artist.split([',', '&', ';']).next().unwrap_or(artist).trim();
+    let mut queries = Vec::new();
+    if !isrc.is_empty() {
+        queries.push((format!("isrc:{isrc}"), true));
+    }
+    queries.push((format!("track:{} artist:{a1}", title_core(title).trim()), false));
+    queries.push((format!("{a1} {}", title_core(title).trim()), false));
+    for (q, by_isrc) in &queries {
+        let v = get_json(ag, "https://api.spotify.com/v1/search", &[("q", q), ("type", "track"), ("limit", "10"), ("market", "ES")], Some(&bearer))?;
+        let hit = v.get("tracks").and_then(|t| t.get("items")).and_then(Value::as_array).and_then(|items| {
+            items.iter().find_map(|it| {
+                let t = it.get("name").and_then(Value::as_str).unwrap_or("");
+                let a = it.get("artists").and_then(|a| a.get(0)).and_then(|a| a.get("name")).and_then(Value::as_str).unwrap_or("");
+                if !by_isrc && !same_song(title, artist, t, a) {
+                    return None;
+                }
+                it.get("external_urls").and_then(|u| u.get("spotify")).and_then(Value::as_str).and_then(|u| clean_link("spotify", u))
+            })
+        });
+        if hit.is_some() {
+            return Ok(hit);
         }
-        it.get("external_urls").and_then(|u| u.get("spotify")).and_then(Value::as_str).and_then(|u| clean_link("spotify", u))
-    })
+    }
+    Ok(None)
 }
 
 /// YouTube por su API (clave en Ajustes): el vídeo oficial o el «- Topic».
-fn youtube(ag: &ureq::Agent, api: &PlatformApi, title: &str, artist: &str) -> Option<String> {
+fn youtube(ag: &ureq::Agent, api: &PlatformApi, title: &str, artist: &str) -> Result<Option<String>, String> {
     let key = api.youtube_api_key.trim();
     if key.is_empty() {
-        return None;
+        return Err("sin clave (pestaña IA)".into());
     }
     let q = format!("{} - {}", artist.split(',').next().unwrap_or(artist).trim(), title.trim());
     let v = get_json(
@@ -279,49 +320,85 @@ fn youtube(ag: &ureq::Agent, api: &PlatformApi, title: &str, artist: &str) -> Op
         &[("part", "snippet"), ("type", "video"), ("videoCategoryId", "10"), ("maxResults", "5"), ("q", &q), ("key", key)],
         None,
     )
-    .ok()?;
-    v.get("items")?.as_array()?.iter().find_map(|it| {
+    .map_err(|e| if e == "HTTP 403" { "clave rechazada o cuota diaria agotada".to_string() } else { e })?;
+    let Some(items) = v.get("items").and_then(Value::as_array) else { return Ok(None) };
+    Ok(items.iter().find_map(|it| {
         let t = it.get("snippet").and_then(|s| s.get("title")).and_then(Value::as_str).unwrap_or("");
-        if !norm(t).contains(&norm(title)) {
+        if !norm(t).contains(&norm(title_core(title))) {
             return None;
         }
         let id = it.get("id").and_then(|i| i.get("videoId")).and_then(Value::as_str)?;
         Some(id.to_string())
-    })
+    }))
+}
+
+/// Resultado de una búsqueda: los enlaces y, por cada fuente que no dio
+/// nada, el motivo («Deezer: no está», «Spotify: HTTP 401»…).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct Lookup {
+    pub links: Links,
+    pub notes: Vec<String>,
 }
 
 /// Busca los enlaces que faltan. No guarda nada: lo decide quien llama.
-pub fn lookup(api: &PlatformApi, isrc: &str, title: &str, artist: &str, have: &Links) -> Links {
+pub fn lookup(api: &PlatformApi, isrc: &str, title: &str, artist: &str, have: &Links) -> Lookup {
     let ag = agent();
     let mut out = have.clone();
+    let mut notes = Vec::new();
     if title.trim().is_empty() {
-        return out;
+        return Lookup { links: out, notes: vec!["La canción no tiene título".into()] };
     }
-    if !out.is_complete() {
-        if let Some(dz) = deezer_link(&ag, isrc, title, artist) {
-            if let Some(l) = odesli(&ag, &dz) {
+    let mut odesli_done = false;
+    let mut via_odesli = |out: &mut Links, notes: &mut Vec<String>, url: &str| {
+        if odesli_done || out.is_complete() {
+            return;
+        }
+        match odesli(&ag, url) {
+            Ok(l) => {
+                odesli_done = true;
                 out.fill_from(&l);
             }
+            Err(e) => notes.push(format!("Odesli: {e}")),
+        }
+    };
+    if !out.is_complete() {
+        match deezer_link(&ag, isrc, title, artist) {
+            Ok(Some(dz)) => via_odesli(&mut out, &mut notes, &dz),
+            Ok(None) => notes.push("Deezer: no está".into()),
+            Err(e) => notes.push(format!("Deezer: {e}")),
         }
     }
     if out.apple_music.is_empty() {
-        if let Some(u) = itunes(&ag, title, artist) {
-            out.apple_music = u;
+        match itunes(&ag, title, artist) {
+            Ok(Some(u)) => out.apple_music = u,
+            Ok(None) => notes.push("Apple Music: no está".into()),
+            Err(e) => notes.push(format!("Apple Music: {e}")),
         }
+    }
+    // Sin Deezer, Odesli también sirve partiendo de Apple Music.
+    if !out.apple_music.is_empty() {
+        let u = out.apple_music.clone();
+        via_odesli(&mut out, &mut notes, &u);
     }
     if out.spotify.is_empty() {
-        if let Some(u) = spotify(&ag, api, isrc, title, artist) {
-            out.spotify = u;
+        match spotify(&ag, api, isrc, title, artist) {
+            Ok(Some(u)) => out.spotify = u,
+            Ok(None) => notes.push("Spotify: no está".into()),
+            Err(e) => notes.push(format!("Spotify: {e}")),
         }
     }
-    if out.youtube.is_empty() || out.youtube_music.is_empty() {
-        if let Some(id) = youtube(&ag, api, title, artist) {
-            if out.youtube.is_empty() {
+    if !out.spotify.is_empty() {
+        let u = out.spotify.clone();
+        via_odesli(&mut out, &mut notes, &u);
+    }
+    if out.youtube.is_empty() && out.youtube_music.is_empty() {
+        match youtube(&ag, api, title, artist) {
+            Ok(Some(id)) => {
                 out.youtube = format!("https://youtube.com/watch?v={id}");
-            }
-            if out.youtube_music.is_empty() {
                 out.youtube_music = format!("https://music.youtube.com/watch?v={id}");
             }
+            Ok(None) => notes.push("YouTube: no está".into()),
+            Err(e) => notes.push(format!("YouTube: {e}")),
         }
     }
     // Con uno de los dos de YouTube, el otro sale del mismo vídeo.
@@ -336,12 +413,15 @@ pub fn lookup(api: &PlatformApi, isrc: &str, title: &str, artist: &str, have: &L
             out.youtube = format!("https://youtube.com/watch?v={id}");
         }
     }
-    out
+    if out.tidal.is_empty() && !odesli_done && !notes.iter().any(|n| n.starts_with("Odesli")) {
+        notes.push("Tidal y Amazon Music: solo llegan por Odesli".into());
+    }
+    Lookup { links: out, notes }
 }
 
 /// Busca los enlaces de una canción de la biblioteca (rellena solo lo vacío).
 #[tauri::command]
-pub async fn track_links_lookup(state: tauri::State<'_, crate::AppState>, id: String) -> Result<Links, String> {
+pub async fn track_links_lookup(state: tauri::State<'_, crate::AppState>, id: String) -> Result<Lookup, String> {
     let dir = state.data_dir.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let t = crate::library::read_library_internal(&dir).into_iter().find(|t| t.id == id).ok_or("Canción no encontrada")?;
@@ -383,5 +463,6 @@ mod tests {
     fn same_song_ignores_accents_and_brackets() {
         assert!(same_song("Creo (En Vivo)", "René González", "Creo", "Rene Gonzalez"));
         assert!(!same_song("Creo", "René González", "Creo en ti", "Rene Gonzalez"));
+        assert!(same_song("Creo - En Vivo", "René González & Coro", "Creo", "René González"));
     }
 }

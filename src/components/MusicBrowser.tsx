@@ -2222,18 +2222,19 @@ function MusicBrowserBase({
                     type="button"
                     className="btn btn-sm plinks-find"
                     disabled={linksBusy}
-                    title="Busca los enlaces que faltan: Deezer → Odesli (song.link) y, si falta alguno, Apple (iTunes) y las API de Spotify y YouTube si tienen clave"
+                    title="Busca los enlaces que faltan: Deezer → Odesli (song.link); si no, Apple Music (iTunes), Spotify y YouTube (estas dos con clave en la pestaña IA), y Odesli desde el enlace que aparezca. Si falta alguno, el aviso dice por qué"
                     onClick={() => {
                       const id = edit.id;
                       setLinksBusy(true);
                       void trackLinksLookup(id)
-                        .then((found) => {
+                        .then(({ links: found, notes }) => {
                           setEdit((s) => {
                             if (!s || s.id !== id) return s;
                             const links = { ...s.links };
                             let n = 0;
                             for (const p of PLATFORMS) if (!links[p.key]?.trim() && found[p.key]) { links[p.key] = found[p.key]; n++; }
-                            showToast(n ? `${n} enlace${n === 1 ? "" : "s"} encontrado${n === 1 ? "" : "s"}` : "No se han encontrado enlaces nuevos");
+                            const why = notes.length ? ` · ${notes.join(" · ")}` : "";
+                            showToast((n ? `${n} enlace${n === 1 ? "" : "s"} encontrado${n === 1 ? "" : "s"}` : "No se han encontrado enlaces nuevos") + why);
                             return { ...s, links };
                           });
                         })
