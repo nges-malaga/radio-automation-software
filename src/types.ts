@@ -161,6 +161,16 @@ export function chapterAt(t: Pick<Track, "chapters">, fileSecs: number): TrackCh
 }
 
 /** Grabación de los directos */
+/** «¿Sigues ahí?»: en directo, a las en punto y a las y media se pide
+ *  confirmación; si nadie responde, se sale del LIVE y sigue la automatización. */
+export interface LiveCheckSettings {
+  enabled: boolean;
+  /** Segundos de cuenta atrás */
+  seconds: number;
+}
+
+export const LIVE_CHECK_DEFAULTS: LiveCheckSettings = { enabled: true, seconds: 60 };
+
 export interface LiveRecordSettings {
   enabled: boolean;
   /** Carpeta; vacío = «Directos» dentro de la carpeta de música */
@@ -1056,6 +1066,8 @@ export interface Settings {
   liveMode: boolean;
   /** Grabar cada directo (LIVE) con sus cambios de metadatos */
   liveRecord?: LiveRecordSettings;
+  /** Comprobación de presencia durante el directo */
+  liveCheck?: LiveCheckSettings;
   /** Programa seleccionado en modo LIVE */
   liveProgramId: string;
   /** Programas preparados de antemano */

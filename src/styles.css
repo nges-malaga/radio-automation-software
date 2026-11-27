@@ -5283,3 +5283,94 @@ label .help-inline { margin-left: 6px; }
 .plinks-field { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .plinks-ico { flex: 0 0 18px; display: grid; place-items: center; }
 .plinks-field input { flex: 1; min-width: 0; font-size: 12px; }
+
+/* «¿Sigues ahí?» del directo: a pantalla completa, solo se sale respondiendo */
+.lcheck-back {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(6, 8, 12, 0.86);
+  backdrop-filter: blur(6px);
+}
+.lcheck {
+  width: min(640px, 100%);
+  padding: 36px 40px 32px;
+  border-radius: 18px;
+  text-align: center;
+  background: linear-gradient(180deg, #2a1216, var(--panel) 70%);
+  border: 2px solid #ef444488;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+}
+.lcheck-tag {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: #fca5a5;
+}
+.lcheck h1 {
+  margin: 10px 0 6px;
+  font-size: 46px;
+  line-height: 1.1;
+  color: var(--text);
+}
+.lcheck-count {
+  font-size: 120px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  margin: 8px 0 18px;
+}
+.lcheck-bar {
+  height: 8px;
+  border-radius: 99px;
+  background: #ffffff14;
+  overflow: hidden;
+}
+.lcheck-bar i {
+  display: block;
+  height: 100%;
+  background: var(--danger);
+  transition: width 0.2s linear;
+}
+.lcheck p {
+  margin: 18px auto 24px;
+  max-width: 46ch;
+  font-size: 15px;
+  color: var(--text-dim);
+}
+.lcheck-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.lcheck-actions button {
+  font-size: 18px;
+  font-weight: 700;
+  padding: 14px 26px;
+  border-radius: 12px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.lcheck-go {
+  background: var(--live);
+  color: #04130a;
+}
+.lcheck-go:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+.lcheck-end {
+  background: transparent;
+  color: var(--text-dim);
+  border-color: #ffffff33 !important;
+}
+.lcheck-urgent { animation: lcheck-pulse 1s ease-in-out infinite; }
+.lcheck-urgent .lcheck-count { color: #f87171; }
+@keyframes lcheck-pulse {
+  50% { border-color: var(--danger); box-shadow: 0 0 0 6px #ef444433, 0 30px 80px rgba(0, 0, 0, 0.6); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lcheck-urgent { animation: none; }
+}

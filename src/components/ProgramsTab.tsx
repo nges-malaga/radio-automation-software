@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { deleteProgramCover, importProgramCover, pickAnyFolder, pickImageFile, trackUrl } from "../api";
 import { IconChevron, IconNote, IconPlus, IconTrash } from "../icons";
-import { LIVE_RECORD_DEFAULTS, type Block, type LiveRecordSettings, type Program, type Settings } from "../types";
+import { LIVE_CHECK_DEFAULTS, LIVE_RECORD_DEFAULTS, type Block, type LiveRecordSettings, type Program, type Settings } from "../types";
 import { Help } from "./Help";
 
 interface ProgramsTabProps {
@@ -42,6 +42,8 @@ export function ProgramsTab({ settings, blocks = [], onChange, showToast }: Prog
 
   const byId = new Map(programs.map((program) => [program.id, program]));
   const rec = { ...LIVE_RECORD_DEFAULTS, ...(settings.liveRecord ?? {}) };
+  const chk = { ...LIVE_CHECK_DEFAULTS, ...(settings.liveCheck ?? {}) };
+  const setChk = (patch: Partial<typeof chk>) => onChange({ ...settings, liveCheck: { ...chk, ...patch } });
   const setRec = (patch: Partial<LiveRecordSettings>) => onChange({ ...settings, liveRecord: { ...rec, ...patch } });
   const now = new Date();
   const example = (rec.nameTemplate.trim() || LIVE_RECORD_DEFAULTS.nameTemplate)
@@ -175,6 +177,33 @@ export function ProgramsTab({ settings, blocks = [], onChange, showToast }: Prog
         {programs.length === 0 && (
           <Help>Todavía no hay programas. Crea el primero para poder usarlo en directo.</Help>
         )}
+      </fieldset>
+
+      <fieldset className="fieldset">
+        <legend>Control de presencia en directo</legend>
+        <Help>
+          Hombre muerto («¿Sigues ahí?»): con LIVE activado, a las en punto y a las y media aparece un aviso a
+          pantalla completa con una cuenta atrás. Si nadie pulsa «Continuar en directo», se sale del LIVE, se
+          reanudan los eventos y la lista sigue con la siguiente pista (vuelve la automatización). Evita que la
+          emisora se quede con el micrófono abierto y el estudio vacío. No salta si el directo empezó hace menos
+          de 5 minutos.
+        </Help>
+        <label className="check-field">
+          <input type="checkbox" checked={chk.enabled} onChange={(e) => setChk({ enabled: e.target.checked })} />
+          Pedir confirmación cada media hora (:00 y :30)
+        </label>
+        <div className="field-row">
+          <label className="field">
+            <span className="field-label">Cuenta atrás</span>
+            <select value={chk.seconds} disabled={!chk.enabled} onChange={(e) => setChk({ seconds: Number(e.target.value) })}>
+              {[30, 60, 90, 120, 180].map((n) => (
+                <option key={n} value={n}>
+                  {n < 60 ? `${n} s` : n % 60 ? `${Math.floor(n / 60)} min ${n % 60} s` : `${n / 60} min`}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </fieldset>
 
       <fieldset className="fieldset">

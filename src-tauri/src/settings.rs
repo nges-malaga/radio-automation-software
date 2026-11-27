@@ -331,6 +331,8 @@ pub struct Settings {
     /// Grabación de los directos (la interfaz lo gestiona; aquí solo se guarda)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub live_record: Option<serde_json::Value>,
+    /// Comprobación de presencia en directo («¿Sigues ahí?»)
+    pub live_check: Option<serde_json::Value>,
 }
 
 /// Programa de emisión preparado con antelacion: tiene titulo, portada y
@@ -1063,6 +1065,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             live_record: None,
+            live_check: None,
             vst: VstSettings::default(),
             remote: RemoteSettings::default(),
             mobile: crate::mobile::MobileConfig::default(),

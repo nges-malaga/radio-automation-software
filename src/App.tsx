@@ -65,13 +65,14 @@ import type {
   StreamMeta,
   StreamStatus,
 } from "./types";
-import { DEFAULT_ENERGY_CURVE, DEFAULT_SETTINGS, type EnergyCurve, LIVE_RECORD_DEFAULTS, chapterAt, icecastStatsSource, campaignSchedules, effectiveDuration, eventSchedules, type IntroOverlay } from "./types";
+import { DEFAULT_ENERGY_CURVE, DEFAULT_SETTINGS, type EnergyCurve, LIVE_CHECK_DEFAULTS, LIVE_RECORD_DEFAULTS, chapterAt, icecastStatsSource, campaignSchedules, effectiveDuration, eventSchedules, type IntroOverlay } from "./types";
 import { pickIntro } from "./intros";
 import { EMPTY_TRACK, RadioPlayer } from "./audio";
 import { SoundMixer } from "./mixer";
 import { StudioCalls, type StudioSnapshot } from "./studioCalls";
 import { StreamEncoder } from "./streaming";
 import { LiveBar } from "./components/LiveBar";
+import { LiveCheckModal } from "./components/LiveCheckModal";
 import { AudienceModal } from "./components/Audience";
 import { cloudGet, cloudNode } from "./cloud";
 import { TrackEditor } from "./components/TrackEditor";
@@ -3194,6 +3195,57 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autopilotOn, active?.id, settings.campaigns]);
 
+  // «¿Sigues ahí?»: en directo, a las en punto y a las y media se pide
+  // confirmación con cuenta atrás; sin respuesta, fuera del LIVE y vuelve la automatización.
+  const [liveCheck, setLiveCheck] = useState<{ deadline: number; total: number } | null>(null);
+  const liveOnAt = useRef(Date.now());
+  const liveCheckKey = useRef("");
+  useEffect(() => {
+    if (settings.liveMode) liveOnAt.current = Date.now();
+    else setLiveCheck(null);
+  }, [settings.liveMode]);
+  useEffect(() => {
+    const tick = () => {
+      const s = settingsRef.current;
+      const cfg = { ...LIVE_CHECK_DEFAULTS, ...(s.liveCheck ?? {}) };
+      if (!s.liveMode || !cfg.enabled || s.stationMode === "workstation") return;
+      const now = new Date();
+      const m = now.getMinutes();
+      if (m !== 0 && m !== 30) return;
+      const key = `${dayKey(now)} ${now.getHours()}:${m}`;
+      if (liveCheckKey.current === key) return;
+      liveCheckKey.current = key;
+      // Recién empezado el directo, no se pregunta.
+      if (Date.now() - liveOnAt.current < 5 * 60_000) return;
+      const secs = Math.max(10, cfg.seconds || 60);
+      setLiveCheck((c) => c ?? { deadline: Date.now() + secs * 1000, total: secs });
+    };
+    tick();
+    const t = window.setInterval(tick, 1000);
+    return () => window.clearInterval(t);
+  }, []);
+  const endLiveByCheck = useCallback(
+    (timedOut: boolean) => {
+      setLiveCheck(null);
+      const s = settingsRef.current;
+      if (!s.liveMode) return;
+      updateSettings({ ...s, liveMode: false });
+      const p = playerRef.current;
+      if (p && !p.isPlaying) void next();
+      showToast(
+        timedOut
+          ? "Nadie respondió a «¿Sigues ahí?»: fin del directo, vuelve la automatización"
+          : "Directo terminado: vuelve la automatización",
+      );
+    },
+    [updateSettings, next, showToast],
+  );
+  useEffect(() => {
+    if (!liveCheck) return;
+    const t = window.setTimeout(() => endLiveByCheck(true), Math.max(0, liveCheck.deadline - Date.now()));
+    return () => window.clearTimeout(t);
+  }, [liveCheck, endLiveByCheck]);
+
   // Al quitar el LIVE, lo que debia sonar durante el directo no se recupera.
   const liveOffAt = useRef(0);
   const wasLive = useRef(settings.liveMode);
@@ -5195,6 +5247,15 @@ export default function App() {
                   recSecs={recSecs}
                 />
                 {audienceOpen && <AudienceModal onClose={() => setAudienceOpen(false)} />}
+                {liveCheck && settings.liveMode && (
+                  <LiveCheckModal
+                    deadline={liveCheck.deadline}
+                    total={liveCheck.total}
+                    program={(settings.programs ?? []).find((pr) => pr.id === settings.liveProgramId)?.name ?? ""}
+                    onContinue={() => setLiveCheck(null)}
+                    onEnd={() => endLiveByCheck(false)}
+                  />
+                )}
                 <VideoSwitcher
                   settings={settings}
                   onChange={(patch) =>
